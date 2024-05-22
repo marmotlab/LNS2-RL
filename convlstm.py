@@ -1,8 +1,8 @@
-import torch.nn as nn
-import torch
+from torch import zeros,sigmoid,cat,split,stack,tanh
+from torch.nn import Module,Conv2d,ModuleList
 
 
-class ConLSTMCell(nn.Module):
+class ConLSTMCell(Module):
 
     def __init__(self, input_dim, hidden_dim, kernel_size, bias):
         """
@@ -29,7 +29,7 @@ class ConLSTMCell(nn.Module):
         self.padding = 1,1
         self.bias = bias
 
-        self.conv = nn.Conv2d(in_channels=self.input_dim + self.hidden_dim,
+        self.conv = Conv2d(in_channels=self.input_dim + self.hidden_dim,
                               out_channels=4 * self.hidden_dim,
                               kernel_size=self.kernel_size,
                               padding=self.padding,
@@ -38,27 +38,27 @@ class ConLSTMCell(nn.Module):
     def forward(self, input_tensor, cur_state):
         h_cur, c_cur = cur_state
 
-        combined = torch.cat([input_tensor, h_cur], dim=1)  # concatenate along channel axis
+        combined = cat([input_tensor, h_cur], dim=1)  # concatenate along channel axis
 
-        combined_conv = self.conv(combined) #[b*a,hidden+1,h,w]--(N, C_{in}, H_{in}, W_{in})
-        cc_i, cc_f, cc_o, cc_g = torch.split(combined_conv, self.hidden_dim, dim=1)
-        i = torch.sigmoid(cc_i)
-        f = torch.sigmoid(cc_f)
-        o = torch.sigmoid(cc_o)
-        g = torch.tanh(cc_g)
+        combined_conv = self.conv(combined) # [b*a,hidden+1,h,w]--(N, C_{in}, H_{in}, W_{in})
+        cc_i, cc_f, cc_o, cc_g = split(combined_conv, self.hidden_dim, dim=1)
+        i = sigmoid(cc_i)
+        f = sigmoid(cc_f)
+        o = sigmoid(cc_o)
+        g = tanh(cc_g)
 
         c_next = f * c_cur + i * g
-        h_next = o * torch.tanh(c_next)
+        h_next = o * tanh(c_next)
 
         return h_next, c_next
 
     def init_hidden(self, batch_size, image_size):
         height, width = image_size
-        return (torch.zeros(batch_size, self.hidden_dim, height, width, device=self.conv.weight.device),
-                torch.zeros(batch_size, self.hidden_dim, height, width, device=self.conv.weight.device))
+        return (zeros(batch_size, self.hidden_dim, height, width, device=self.conv.weight.device),
+                zeros(batch_size, self.hidden_dim, height, width, device=self.conv.weight.device))
 
 
-class ConLSTM(nn.Module):
+class ConLSTM(Module):
 
     """
 
@@ -115,7 +115,7 @@ class ConLSTM(nn.Module):
                                           kernel_size=self.kernel_size[i],
                                           bias=self.bias))
 
-        self.cell_list = nn.ModuleList(cell_list)
+        self.cell_list = ModuleList(cell_list)
 
     def forward(self, input_tensor, hidden_state=None):
         """
@@ -131,18 +131,10 @@ class ConLSTM(nn.Module):
         -------
         last_state_list, layer_output
         """
-        if not self.batch_first:
-            # (t, b, c, h, w) -> (b, t, c, h, w)
-            input_tensor = input_tensor.permute(1, 0, 2, 3, 4)
 
         b, _, _, h, w = input_tensor.size() # [b*a,t,1,h,w]
 
-        # Implement stateful ConvLSTM
-        if hidden_state is not None:
-            raise NotImplementedError()
-        else:
-            # Since the init is done in forward. Can send image size here
-            hidden_state = self._init_hidden(batch_size=b,
+        hidden_state = self._init_hidden(batch_size=b,
                                              image_size=(h, w))  # [b*a,hidden state,h,w]
 
         layer_output_list = []
@@ -160,15 +152,14 @@ class ConLSTM(nn.Module):
                                                  cur_state=[h, c])
                 output_inner.append(h)
 
-            layer_output = torch.stack(output_inner, dim=1)
+            layer_output = stack(output_inner, dim=1)
             cur_layer_input = layer_output
 
             layer_output_list.append(layer_output)  # final output
             last_state_list.append([h, c])  # hidden state
 
-        if not self.return_all_layers:
-            layer_output_list = layer_output_list[-1:]
-            last_state_list = last_state_list[-1:]
+        layer_output_list = layer_output_list[-1:]
+        last_state_list = last_state_list[-1:]
 
         return layer_output_list, last_state_list,h
 

@@ -14,7 +14,7 @@ public:
     int num_of_agents;
 
 	Instance()=default;
-    Instance(const vector<vector<int>>& obs_map, const vector<pair<int,int>>& start_poss, const vector<pair<int,int>>& goal_poss,int num_of_agents,int num_of_rows);
+    Instance(const vector<vector<int>>& obs_map, const vector<pair<int,int>>& start_poss, const vector<pair<int,int>>& goal_poss,int num_of_agents,int num_of_rows,int num_of_cols);
 
     inline bool validMove(int curr, int next) const
     {
@@ -45,11 +45,9 @@ public:
 private:
 	  // int moves_offset[MOVE_COUNT];
 	  vector<bool> my_map;
-      string map_fname;
-      string agent_fname;
 
-      bool loadMap(const vector<vector<int>>& obs_map);
-      bool loadAgents(const vector<pair<int,int>>& start_poss, const vector<pair<int,int>>& goal_poss);
+	  bool loadMap(const vector<vector<int>>& obs_map);
+	  bool loadAgents(const vector<pair<int,int>>& start_poss, const vector<pair<int,int>>& goal_poss);
 
 	  // Class  SingleAgentSolver can access private members of Node 
 	  friend class SingleAgentSolver;

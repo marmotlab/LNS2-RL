@@ -3,13 +3,13 @@
 #include"Instance.h"
 
 
-Instance::Instance( const vector<vector<int>>& obs_map, const vector<pair<int,int>>& start_poss, const vector<pair<int,int>>& goal_poss,int num_of_agents,int num_of_rows):
-        num_of_agents(num_of_agents),num_of_rows(num_of_rows),num_of_cols(num_of_rows)
+Instance::Instance(const vector<vector<int>>& obs_map, const vector<pair<int,int>>& start_poss, const vector<pair<int,int>>& goal_poss,int num_of_agents,int num_of_rows,int num_of_cols):
+        num_of_agents(num_of_agents),num_of_rows(num_of_rows),num_of_cols(num_of_cols)
 {
     loadMap(obs_map);
     loadAgents(start_poss,goal_poss);
-
 }
+
 
 bool Instance::loadMap(const vector<vector<int>>& obs_map)
 {

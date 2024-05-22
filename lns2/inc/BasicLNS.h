@@ -19,4 +19,6 @@ struct Neighbor
 {
     vector<int> agents;
     set<pair<int, int>> colliding_pairs;  // id1 < id2
+    set<pair<int, int>> old_colliding_pairs;  // id1 < id2
+    vector<Path> old_paths;
 };
