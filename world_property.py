@@ -4,8 +4,10 @@ from alg_parameters import *
 
 dirDict = {0: (0, 0), 1: (0, 1), 2: (1, 0), 3: (0, -1), 4: (-1, 0), 5: (1, 1), 6: (1, -1), 7: (-1, -1),
            8: (-1, 1)}  # x,y operation for corresponding action
+
 actionDict = {v: k for k, v in dirDict.items()}
 opposite_actions = {0: -1, 1: 3, 2: 4, 3: 1, 4: 2, 5: 7, 6: 8, 7: 5, 8: 6}
+
 
 class State(object):  # world property
     def __init__(self, state,state_dict, global_num_agents,start_list,goal_list):

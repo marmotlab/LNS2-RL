@@ -4,15 +4,15 @@ import datetime
 
 
 class EnvParameters:
-    LOCAL_N_AGENTS_LIST = [8,8,8]  # number of agents used in training
-    GLOBAL_N_AGENT_LIST=[(0.4,0.45,0.5),(0.5,0.55,0.6),(0.6,0.65,0.7)]
+    LOCAL_N_AGENTS_LIST = 8 # number of agents used in training
+    GLOBAL_N_AGENT_LIST=(0.6,0.65,0.7)
     N_ACTIONS = 5
     EPISODE_LEN = [356,356,356]
     FOV_SIZE = 9
     WORLD_SIZE_LIST = [10,25,50]
-    OBSTACLE_PROB_LIST = [(0.05,0.075,0.1),(0.1,0.125,0.15),(0.15,0.175,0.2)]
-    ACTION_COST = [-0.4,-0.5,-0.6]
-    IDLE_COST = [-0.4,-0.5,-0.6]
+    OBSTACLE_PROB_LIST = (0.15,0.175,0.2)
+    ACTION_COST = -0.6
+    IDLE_COST = -0.6
     ADD_COST=-0.2
     MOVE_BACK_COST=-0.4
     GOAL_REWARD = 0.0
@@ -20,14 +20,15 @@ class EnvParameters:
     AG_COLLISION_COST = -1.5
     NUM_TIME_SLICE=9
     WINDOWS=15
-    OFF_ROUTE_FACTOR=[0.06,0.05,0.04]
+    OFF_ROUTE_FACTOR=0.04
     DIS_FACTOR = 0.2
-    SWITCH_TIMESTEP=[1e7,2e7]
     UTI_WINDOWS=list(range(-2,16))
     UTI_WEIGHT=[0.25,0.75] # edge,vertex
-    OVERALL_WEIGHT= -0.3
+    OVERALL_WEIGHT=-0.3
     DIS_TIME_WEIGHT = [0.9, 0.1]
     K_STEPS=5
+    SWITCH_FACTOR=1.2
+    MAX_FACTOR=2.2
 
 
 class TrainingParameters:
@@ -45,10 +46,9 @@ class TrainingParameters:
     N_MAX_STEPS = 7e7  # maximum number of time steps used in training
     N_STEPS = 2 ** 8  # number of time steps per process per data collection
     MINIBATCH_SIZE =int(2**9)
-    ITERATION_LIMIT_LIST=[30,65,100]
+    ITERATION_LIMIT_LIST=100
     opti_eps=1e-5
     weight_decay=0
-    DEMONSTRATION_THRES=[3e6,2e6,0]
 
 class NetParameters:
     NET_SIZE = 512
@@ -74,9 +74,9 @@ class RecordingParameters:
     ENTITY = 'your_name'
     TIME = datetime.datetime.now().strftime('%d-%m-%y%H%M')
     EXPERIMENT_PROJECT = 'MAPF'
-    EXPERIMENT_NAME = 'LNS2+RL'
+    EXPERIMENT_NAME = 'second_stage'
     EXPERIMENT_NOTE = ''
-    SAVE_INTERVAL = TrainingParameters.N_ENVS * TrainingParameters.N_STEPS*400  # interval of saving model
+    SAVE_INTERVAL = TrainingParameters.N_ENVS * TrainingParameters.N_STEPS*200  # interval of saving model
     PRINT_INTERVAL=5e4
     MODEL_PATH = './models' + '/' + EXPERIMENT_PROJECT + '/' + EXPERIMENT_NAME + TIME
     LOSS_NAME = ['all_loss', 'policy_loss', 'policy_entropy', 'critic_loss', 'valid_loss','clipfrac',

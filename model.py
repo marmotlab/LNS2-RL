@@ -39,6 +39,7 @@ class Model(object):
             actions[i] = valid_action[i][np.random.choice(range(valid_dist.shape[1]), p=valid_dist.ravel())]
         return actions, ps, v, output_state, num_invalid
 
+
     def value(self, obs, vector, input_state):
         """using neural network to predict state values"""
         obs = torch.from_numpy(obs).to(self.device)
@@ -130,36 +131,3 @@ class Model(object):
         """load global weights to local models"""
         self.network.load_state_dict(weights)
 
-    def generate_state(self, obs, vector, input_state):
-        """generate corresponding hidden states and messages in imitation learning"""
-        obs = torch.from_numpy(obs).to(self.device)
-        vector = torch.from_numpy(vector).to(self.device)
-        _, _, _, output_state,_ = self.network(obs, vector, input_state)
-        return output_state
-
-    def imitation_train(self, observation, vector, optimal_action, input_state):
-        """train model0 by imitation learning"""
-        self.net_optimizer.zero_grad()
-
-        observation = torch.from_numpy(observation).to(self.device)
-        vector = torch.from_numpy(vector).to(self.device)
-        optimal_action = torch.from_numpy(optimal_action).to(self.device)
-        input_state_h = torch.from_numpy(
-            np.reshape(input_state[:, 0], (-1, NetParameters.NET_SIZE))).to(self.device)
-        input_state_c = torch.from_numpy(
-            np.reshape(input_state[:, 1], (-1, NetParameters.NET_SIZE))).to(self.device)
-
-        input_state = (input_state_h, input_state_c)
-
-        with autocast():
-            _, _, _, _, logits = self.network(observation, vector, input_state)
-            logits = torch.swapaxes(logits, 1, 2)
-            imitation_loss = F.cross_entropy(logits, optimal_action)
-
-        self.net_scaler.scale(imitation_loss).backward()
-        self.net_scaler.unscale_(self.net_optimizer)
-        # clip gradient
-        grad_norm = torch.nn.utils.clip_grad_norm_(self.network.parameters(), TrainingParameters.MAX_GRAD_NORM)
-        self.net_scaler.step(self.net_optimizer)
-        self.net_scaler.update()
-        return [imitation_loss.cpu().detach().numpy(), grad_norm.cpu().detach().numpy()]  # for recording

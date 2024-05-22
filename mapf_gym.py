@@ -11,20 +11,19 @@ from dynamic_state import DyState
 opposite_actions = {0: -1, 1: 3, 2: 4, 3: 1, 4: 2, 5: 7, 6: 8, 7: 5, 8: 6}
 
 
-class CL_MAPFEnv(gym.Env):
+class MAPFEnv(gym.Env):
     """map MAPF problems to a standard RL environment"""
 
     def __init__(self,env_id,global_num_agents_range=EnvParameters.GLOBAL_N_AGENT_LIST, fov_size=EnvParameters.FOV_SIZE, size=EnvParameters.WORLD_SIZE_LIST,
-                 prob=EnvParameters.OBSTACLE_PROB_LIST,im_flag=False):
+                 prob=EnvParameters.OBSTACLE_PROB_LIST):
         """initialization"""
         self.global_num_agents_range = global_num_agents_range
         self.fov_size =fov_size
         self.SIZE = size  # size of a side of the square grid
         self.PROB = prob  # obstacle density
         self.env_id=env_id
-        self.im_flag=im_flag
 
-    def global_set_world(self,cl_num_task):
+    def global_set_world(self):
         """randomly generate a new task"""
 
         def get_connected_region(world0, regions_dict, x0, y0):
@@ -53,11 +52,11 @@ class CL_MAPFEnv(gym.Env):
             regions_dict[(x0, y0)] = visited
             return visited
 
-        prob = random.choice(self.PROB[cl_num_task])
+        prob = random.choice(self.PROB)
         task_set=random.choice(range(len(self.SIZE)))
         self.size = self.SIZE[task_set]
         self.episode_len = EnvParameters.EPISODE_LEN[task_set]
-        self.global_num_agent=int(round(random.choice(self.global_num_agents_range[cl_num_task])*self.size*self.size))
+        self.global_num_agent=int(round(random.choice(self.global_num_agents_range)*self.size*self.size))
         self.map = -(np.random.rand(int(self.size), int(self.size)) < prob).astype(int)  # -1 obstacle,0 nothing
         self.fix_state=copy.copy(self.map)
         self.fix_state_dict = {}
@@ -122,7 +121,8 @@ class CL_MAPFEnv(gym.Env):
         for local_i, i in enumerate(self.world.local_agents):
             direction = self.world.get_dir(actions[local_i])
             ax = self.world.local_agents_poss[local_i][0]
-            ay = self.world.local_agents_poss[local_i][1]
+            ay = self.world.local_agents_poss[local_i][1]  # current position
+            # Otherwise, let's look at the validity of the move
             dx, dy = direction[0], direction[1]
             if ax + dx >= self.world.state.shape[0] or ax + dx < 0 or ay + dy >= self.world.state.shape[1] or ay + dy < 0:
                 raise ValueError("out of boundaries")
@@ -378,10 +378,52 @@ class CL_MAPFEnv(gym.Env):
         self.space_ulti_vertex=10*self.space_ulti_vertex/self.global_num_agent
         self.space_ulti_action = 10 * self.space_ulti_action / self.global_num_agent
 
-    def joint_step(self, actions):
+    def joint_step(self, actions,perf_dict):
         """execute joint action and obtain reward"""
         self.time_step+=1
         dynamic_collision_status,agent_collision_status,reach_goal_status= self.joint_move(actions)
+        for i in range(self.local_num_agents):
+            self.local_path[i].append(self.world.local_agents_poss[i])
+
+        if self.time_step >= self.switch_len and not self.switch_flag:
+            old_path = []
+            for path in self.paths:
+                if self.time_step<len(path):
+                    old_path.append(path[self.time_step:])
+                else:
+                    old_path.append([path[-1]])
+            new_coll_pair_num = self.lns2_model.add_sipps(old_path, self.local_agents, self.world.agents_poss)
+            new_path = self.lns2_model.add_sipps_path
+            new_coll_pair=self.lns2_model.add_neighbor.colliding_pairs
+            self.add_collision_pairs = self.new_collision_pairs.union(new_coll_pair)
+            replan_ag = []
+            self.add_local_path=copy.deepcopy(self.local_path)
+            for local_i, i in enumerate(new_path):
+                self.add_local_path[local_i] += i[1:]
+                if len(self.add_local_path[local_i])>= self.max_len:
+                    global_i=self.local_agents[local_i]
+                    replan_ag.append(global_i)
+            if len(replan_ag) != 0:
+                to_remove = set()
+                for item in self.add_collision_pairs:
+                    if item[0] in replan_ag or item[1] in replan_ag:
+                        to_remove.add(item)
+                self.add_collision_pairs.difference_update(to_remove)
+
+                self.lns2_model.replan_sipps(self.add_local_path, replan_ag)
+                new_path = self.lns2_model.replan_sipps_path
+                new_coll_pair = self.lns2_model.replan_neighbor.colliding_pairs
+                self.add_collision_pairs = self.add_collision_pairs.union(new_coll_pair)
+                for local_i, i in enumerate(replan_ag):
+                    local_i_2 = self.local_agents.index(i)
+                    self.add_local_path[local_i_2] = new_path[local_i]
+
+            self.switch_flag = True
+            self.success=True
+            perf_dict['switch_goals']=sum(reach_goal_status)
+            perf_dict['switch_diff_collide']=len(self.add_collision_pairs)-self.sipp_coll_pair_num
+            if len(self.add_collision_pairs) <= self.sipp_coll_pair_num:
+                perf_dict['switch_team_better']=1
 
         rewards = np.zeros((1, self.local_num_agents), dtype=np.float32)
         obs = np.zeros((1, self.local_num_agents, NetParameters.NUM_CHANNEL, EnvParameters.FOV_SIZE, EnvParameters.FOV_SIZE),
@@ -394,7 +436,7 @@ class CL_MAPFEnv(gym.Env):
             rewards[:, i] += EnvParameters.OVERALL_WEIGHT * EnvParameters.UTI_WEIGHT[0] * \
                              self.space_ulti_action[int(actions[i]),
                                  self.world.local_agents_poss[i][0],self.world.local_agents_poss[i][1]]
-        self.update_ulti()  # update space utilization before observe it
+        self.update_ulti()
         self.predict_next()
         for i in range(self.local_num_agents):
             rewards[:, i] += EnvParameters.DY_COLLISION_COST*dynamic_collision_status[i]
@@ -438,48 +480,84 @@ class CL_MAPFEnv(gym.Env):
         success=False
         if all_reach_goal and self.time_step>=self.makespan:
             done = True
+            self.success=True
             if len(self.new_collision_pairs)<=self.sipp_coll_pair_num:
                 success = True
         if self.time_step >= self.episode_len:
             done = True
         return obs, vector, rewards, done, next_valid_actions,num_on_goal, num_dynamic_collide,num_agent_collide,success,real_r
 
-    def _global_reset(self,cl_num_task):
+    def _global_reset(self):
         """restart a new task"""
-        self.global_set_world(cl_num_task)  # back to the initial situation
+        self.global_set_world()  # back to the initial situation
         self.lns2_model=my_lns2.MyLns2(self.env_id*123,self.map,self.start_list,self.goal_list,self.global_num_agent,self.map.shape[0])
         self.lns2_model.init_pp()
         self.paths=self.lns2_model.vector_path
+        self.global_num_collison = self.lns2_model.num_of_colliding_pairs
+        self.switch_len = EnvParameters.SWITCH_FACTOR * max([len(path) for path in self.paths])
+        self.max_len = EnvParameters.MAX_FACTOR * max([len(path) for path in self.paths])
         self.dynamic_state = DyState(self.paths,self.global_num_agent,self.map.shape)
-        self.idle_cost= EnvParameters.IDLE_COST[cl_num_task]
-        self.action_cost= EnvParameters.ACTION_COST[cl_num_task]
-        self.off_route_factor=EnvParameters.OFF_ROUTE_FACTOR[cl_num_task]
+        self.idle_cost= EnvParameters.IDLE_COST
+        self.action_cost= EnvParameters.ACTION_COST
+        self.off_route_factor=EnvParameters.OFF_ROUTE_FACTOR
+        self.success = False
+        self.switch_flag=False
         return
 
-    def _local_reset(self, local_num_agents,first_time):
+    def _local_reset(self, local_num_agents,first_time,perf_dict):
         """restart a new task"""
-        self.local_num_agents = local_num_agents
-        new_agents = random.sample(range(self.global_num_agent), local_num_agents)
         self.time_step=0
-        self.previous_action=np.zeros(local_num_agents)
+        update = False
+
+        if not first_time and self.success:
+            if not self.switch_flag:
+                self.add_collision_pairs = self.new_collision_pairs
+                self.add_local_path = self.local_path
+                perf_dict['switch_goals'] = self.local_num_agents
+                perf_dict['switch_diff_collide'] = len(self.add_collision_pairs) - self.sipp_coll_pair_num
+                if len(self.add_collision_pairs) <= self.sipp_coll_pair_num:
+                    perf_dict['switch_team_better'] = 1
+            if len(self.add_collision_pairs) <= self.old_coll_pair_num:
+                new_path = self.add_local_path
+                new_collision_pair = self.add_collision_pairs
+                update = True
+        if not first_time and not update and self.sipp_coll_pair_num <= self.old_coll_pair_num:
+            new_path = self.sipps_path
+            new_collision_pair = self.sipp_collision_pairs
+            update = True
+
+        if not update:
+            new_path = [[(0, 0)] for _ in range(2)]
+            new_collision_pair = set()
+            new_collision_pair.add((0, 0))
+
+        self.switch_flag = False
+        self.success = False
+        global_succ=self.lns2_model.select_and_sipps(update,first_time,new_path,new_collision_pair,local_num_agents)
+        if global_succ:
+            return True
+        self.makespan=self.lns2_model.makespan
+        self.sipp_collision_pairs=self.lns2_model.neighbor.colliding_pairs
+        self.old_coll_pair_num=self.lns2_model.old_coll_pair_num
+        self.sipps_path=self.lns2_model.sipps_path
+        self.global_num_collison=self.lns2_model.num_of_colliding_pairs
+        self.sipp_coll_pair_num=len(self.sipp_collision_pairs)
+        path_new_agent ={}
+        for global_index in self.lns2_model.used_shuffled_agents:
+            path_new_agent[global_index]=self.paths[global_index] # new agents. old path
+        self.lns2_model.extract_path()
+        self.paths=self.lns2_model.vector_path
         if not first_time:
-            prev_path ={}
-            for local_index in range(self.local_num_agents):
-                prev_path[self.world.local_agents[local_index]]=self.sipps_path[local_index]
-            prev_agents=self.local_agents
+            prev_path = {}
+            for global_index in self.local_agents:
+                prev_path[global_index]=self.paths[global_index]
+            prev_agents=self.local_agents # old agents, new path
         else:
             prev_agents = None
-            prev_path = None  # old agents, new path
-        path_new_agent ={}
-        for global_index in new_agents:
-            path_new_agent[global_index]=self.paths[global_index] # new agents. old path
-        if not first_time:
-            for local_index in range(self.local_num_agents):
-                self.paths[self.world.local_agents[local_index]] = self.sipps_path[local_index] # old agents, new path
-        self.local_agents = new_agents
-        self.sipp_coll_pair_num=self.lns2_model.calculate_sipps(self.local_agents)
-        self.makespan = self.lns2_model.makespan
-        self.sipps_path=self.lns2_model.sipps_path
+            prev_path = None
+        self.local_agents = self.lns2_model.used_shuffled_agents
+        self.local_num_agents = len(self.local_agents)
+        self.previous_action=np.zeros(local_num_agents)
         self.sipps_max_len=max([len(path) for path in self.sipps_path])
         self.dynamic_state.reset_local_tasks(self.local_agents,path_new_agent, prev_agents, prev_path,self.makespan+1)
         self.world.reset_local_tasks(self.fix_state,self.fix_state_dict,self.start_list,self.local_agents)
@@ -490,7 +568,15 @@ class CL_MAPFEnv(gym.Env):
         self.new_collision_pairs = set()
         self.update_ulti()
         self.predict_next()
-        return
+        self.local_path = [[self.world.local_agents_poss[i]] for i in range(self.local_num_agents)]
+        return False
 
     def list_next_valid_actions(self,local_agent_index):
         return self.world.list_next_valid_actions(local_agent_index)
+
+
+
+
+
+
+

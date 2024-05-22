@@ -1,5 +1,4 @@
 import random
-
 import numpy as np
 import torch
 import wandb
@@ -15,12 +14,6 @@ def set_global_seeds(i):
     random.seed(i)
     torch.backends.cudnn.deterministic = True
 
-def write_to_wandb_im(step, mb_loss=None):
-    """record performance using wandb"""
-    mb_loss = np.nanmean(mb_loss, axis=0)
-    wandb.log({'Loss/Im_loss':mb_loss[0]}, step=step)
-    wandb.log({'Grad/Im_grad_norm':mb_loss[1]}, step=step)
-
 
 def write_to_wandb(step, performance_dict=None, mb_loss=None):
     """record performance using wandb"""
@@ -29,19 +22,23 @@ def write_to_wandb(step, performance_dict=None, mb_loss=None):
     wandb.log({'Perf/Valid_rate': performance_dict['invalid']}, step=step)
     wandb.log({'Perf/Episode_length': performance_dict['num_step']}, step=step)
     wandb.log({'Perf/Final_goals': performance_dict['final_goals']}, step=step)
+    wandb.log({'Perf/switch_goals': performance_dict['switch_goals']}, step=step)
     wandb.log({'Perf/Num_dynamic_collide': performance_dict['num_dynamic_collide']},
               step=step)
     wandb.log({'Perf/Num_agent_collide': performance_dict['num_agent_collide']},
               step=step)
     wandb.log({'Perf/Diff_collide': performance_dict['diff_collide']},
               step=step)
+    wandb.log({'Perf/switch_Diff_collide': performance_dict['switch_diff_collide']},
+              step=step)
     wandb.log({'Perf/Team_better': performance_dict["team_better"]},
+              step=step)
+    wandb.log({'Perf/switch_Team_better': performance_dict["switch_team_better"]},
               step=step)
     wandb.log({'Perf/Real_reward': performance_dict["real_reward"]},
               step=step)
     wandb.log({'Perf/Num_collide': performance_dict['num_collide']},
               step=step)
-
     for (val, name) in zip(loss_vals, RecordingParameters.LOSS_NAME):
         if name == 'grad_norm':
             wandb.log({'Grad/' + name: val}, step=step)
@@ -51,8 +48,9 @@ def write_to_wandb(step, performance_dict=None, mb_loss=None):
 
 def perf_dict_driver():
     performance_dict = {'num_step': [], 'reward': [], 'invalid': [],
-                        'num_dynamic_collide': [], "num_agent_collide": [],"final_goals":[],"diff_collide":[],
-                        "real_reward":[],"team_better":[],"num_collide":[]}
+                        'num_dynamic_collide': [], "num_agent_collide": [],"final_goals":[],
+                        "diff_collide":[],"real_reward":[],"team_better":[],"num_collide":[],'switch_goals':[],
+                        'switch_diff_collide':[], 'switch_team_better':[]}
 
     return performance_dict
 
@@ -70,10 +68,14 @@ def update_perf(one_episode_perf, performance_dict, num_on_goals,num_agent):
     performance_dict['real_reward'].append(one_episode_perf['real_reward'])
     performance_dict['team_better'].append(one_episode_perf['team_better'])
     performance_dict['num_collide'].append(one_episode_perf['num_collide'])
+    performance_dict['switch_goals'].append(one_episode_perf['switch_goals'])
+    performance_dict['switch_diff_collide'].append(one_episode_perf['switch_diff_collide'])
+    performance_dict['switch_team_better'].append(one_episode_perf['switch_team_better'])
     return performance_dict
 
 def one_episode_perf():
     one_episode_perf = {'num_step': 0, 'reward': 0, 'invalid': 0,
-                        'num_dynamic_collide': 0, "num_agent_collide": 0,"final_goals":0,"diff_collide":0,
-                        "real_reward":0,"team_better":0,"num_collide":0}
+                        'num_dynamic_collide': 0, "num_agent_collide": 0,"final_goals":0,
+                        "diff_collide":0,"real_reward":0,"team_better":0,"num_collide":0,'switch_goals':0,
+                        'switch_diff_collide':0,'switch_team_better':0}
     return one_episode_perf

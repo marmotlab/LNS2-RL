@@ -1,5 +1,4 @@
 import numpy as np
-
 dirDict = {0: (0, 0), 1: (0, 1), 2: (1, 0), 3: (0, -1), 4: (-1, 0)}  # 0: stay, 1:right, 2: down, 3:left, 4:up
 actionDict = {v: k for k, v in dirDict.items()}
 
@@ -50,16 +49,16 @@ class DyState(object):  # world property
             delete_agent =new_agents
 
         for i in delete_agent: # delete
-            path_len = len(path_new_agent[i])
+            max_len = len(path_new_agent[i])
             for t in range(self.max_lens):
-                if path_len <= t:
+                if max_len <= t:
                     poss = path_new_agent[i][-1]
                 else:
                     poss = path_new_agent[i][t]
                 self.state[t][poss] -= 1
                 assert self.state[t][poss]>=0
                 if t>0:
-                    if path_len <= t-1:
+                    if max_len <= t-1:
                         prev_poss = path_new_agent[i][-1]
                     else:
                         prev_poss = path_new_agent[i][t-1]
@@ -68,16 +67,16 @@ class DyState(object):  # world property
 
         if prev_agents != None:
             add_agent=set(prev_agents)-set(new_agents)
-            for i in add_agent:  #add
-                path_len = len(old_path[i])
+            for i in add_agent:  # add
+                max_len = len(old_path[i])
                 for t in range(self.max_lens):
-                    if path_len <= t:
+                    if max_len <= t:
                         poss = old_path[i][-1]
                     else:
                         poss = old_path[i][t]
                     self.state[t][poss] += 1
                     if t > 0:
-                        if path_len <= t - 1:
+                        if max_len <= t - 1:
                             prev_poss = old_path[i][-1]
                         else:
                             prev_poss = old_path[i][t - 1]
