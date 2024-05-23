@@ -16,6 +16,10 @@ conda create --name myenv python=3.11
 conda activate myenv
 pip install -r requirements.txt
 ```
+Then install torch manually 
+```
+pip install torch==2.1.1+cu118 torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/cu118
+```
 
 ### C++
 The C++ code requires the external libraries BOOST (https://www.boost.org/) and Eigen (https://eigen.tuxfamily.org/). 
@@ -34,6 +38,8 @@ sudo apt update
 
 ## Run
 After installing the above libraries, you can run the code by following the instructions below.
+
+### C++ Compile
 No matter which branch you use, you must first compile the included C++ code separately using CMake. 
 Begin by cd to the directory, then run
 
@@ -49,7 +55,8 @@ In the 'LNS2\_RL\_eval' branch, the directory names are 'lns2' and 'mapf_env'.
 ### Training
 The complete training of the MARL model consists of two stages.
 The code in the main branch is used for the first training stage, and the code in the "second\_stage" branch is used for the second training stage.
-To begin the first training stage of, cd to the directory of the downloaded main branch code and then run:
+
+To begin the first training stage, cd to the directory of the downloaded main branch code and then run:
 ```
 CUDA_VISIBLE_DEVICES=gpu_ids python driver.py
 ```
@@ -73,7 +80,7 @@ Finally, start the evaluation by run
 CUDA_VISIBLE_DEVICES=gpu_ids python multi_eval.py
 ```
 This multi-process evaluation code will print the test results in the terminal.
-
+If wandb=True is set, these print results can be found in the wandb logs file.
 
 We provide an example task set "maps_60_10_10_0.175" in this repo.
 More task sets we evaluated in the paper and the fully trained MARL model can be download from [https://www.dropbox.com/scl/fo/bmn29rfzeb84ipgs81kqe/ADPMx_VNpDAdU_GEsNo9xnM?rlkey=i2d8gt4n1dfntt938s7asoq8a&st=bfz5revv&dl=0](https://www.dropbox.com/scl/fo/bmn29rfzeb84ipgs81kqe/ADPMx_VNpDAdU_GEsNo9xnM?rlkey=i2d8gt4n1dfntt938s7asoq8a&st=bfz5revv&dl=0)
