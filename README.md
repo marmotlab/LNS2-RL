@@ -8,6 +8,15 @@ This is a hybrid C++/Python project.
 The neural network is written in Python, and most of the code for the simulation environment and the algorithm is written in C++.
 We use pybind11 to bind the two languages.
 
+### Python 
+For optimal speed of the algorithm we recommend using python=3.11.
+
+```
+conda create --name myenv python=3.11
+conda activate myenv
+pip install -r requirements.txt
+```
+
 ### C++
 The C++ code requires the external libraries BOOST (https://www.boost.org/) and Eigen (https://eigen.tuxfamily.org/). 
 Here is an easy way of installing the required libraries on Ubuntu:
@@ -21,13 +30,6 @@ sudo apt update
    * Install the Eigen library (used for linear algebra computing)
 ```
     sudo apt install libeigen3-dev
-```
-
-### Python 
-For optimal speed of the algorithm we recommend using python=3.11.
-
-```
-conda create --name myenv --file requirements.txt
 ```
 
 ## Run
