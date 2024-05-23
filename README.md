@@ -5,7 +5,7 @@ Part of the C++ code in this repository draws inspiration from [MAPF-LNS2: Fast 
 
 ## Installation
 This is a hybrid C++/Python project. 
-The neural network is written in Python, and most of the code for the simulation environment and the algorithm is written in C++.
+The neural network is written in Python, and part of the code for the simulation environment and the algorithm is written in C++.
 We use pybind11 to bind the two languages.
 
 ### Python 
