@@ -1,5 +1,5 @@
 # LNS2+RL: Combining Multi-agent Reinforcement Learning with Large Neighborhood Search in Multi-agent Path Finding
-This repository is the official implementation of [LNS2+RL: Combining Multi-agent Reinforcement Learning with Large Neighborhood Search in Multi-agent Path Finding]() 
+This repository is the official implementation of [LNS2+RL: Combining Multi-agent Reinforcement Learning with Large Neighborhood Search in Multi-agent Path Finding](https://arxiv.org/abs/2405.17794) 
 The paper is currently under review. 
 Part of the C++ code in this repository draws inspiration from [MAPF-LNS2: Fast Repairing for Multi-Agent Path Finding via Large Neighborhood Search](https://github.com/Jiaoyang-Li/MAPF-LNS2)
 
