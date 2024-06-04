@@ -49,7 +49,6 @@ pydantic_core==2.18.2
 pyglet==2.0.15
 Pygments==2.18.0
 PyYAML==6.0.1
-ray @ https://s3-us-west-2.amazonaws.com/ray-wheels/latest/ray-3.0.0.dev0-cp311-cp311-manylinux2014_x86_64.whl#sha256=bb69ca2c91d098417592590585ec1751f6db7e85d05a27d0166d92d3a805443e
 referencing==0.35.1
 requests==2.32.2
 rich==13.7.1
