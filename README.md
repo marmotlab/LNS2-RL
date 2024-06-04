@@ -21,7 +21,7 @@ Then install torch manually
 ```
 pip install torch==2.1.1+cu118 torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/cu118
 ```
-install ray manually 
+Install ray manually 
 ```
 pip install -U "ray[default] @ https://s3-us-west-2.amazonaws.com/ray-wheels/latest/ray-3.0.0.dev0-cp311-cp311-manylinux2014_x86_64.whl"
 ```
