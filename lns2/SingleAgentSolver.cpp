@@ -1,6 +1,12 @@
 #include "SingleAgentSolver.h"
 
-
+/*#########################
+% compute_heuristics:
+% - Inicializálja a my_heuristic vektort minden cellára MAX_TIMESTEP értékre.
+% - A célból indulva (root: goal_location, 0 értékkel) fordított Dijkstra-szerű keresés,
+%   ahol a min-heap-et Node::compare_node szabályozza.
+% - Frissíti a my_heuristic értékeket, ha egy szomszéd költsége (value) javul.
+*/
 void SingleAgentSolver::compute_heuristics()
 {
 	struct Node
@@ -52,6 +58,22 @@ std::ostream& operator<<(std::ostream& os, const LLNode& node)
 }
 
 // Returns a path that minimizes the number of target locations visited, breaking ties by cost.
+/*#########################
+% findMinimumSetofColldingTargets:
+% Inputs:
+%   - goal_table: Vektor, amely a cél cellákhoz tartozó ütközési időpontokat tárolja.
+%   - A_target: Üres halmaz, amibe a conflict okozó célok indexeit gyűjti.
+%
+% Function behaviour:
+%   - A start_location-tól indulva A*-szerű keresést végez a célhoz,
+%     ahol az OPEN listában a csomópontokat először a num_of_targets (a célok ütközésének száma)
+%     alapján rendezi, majd a teljes költség (g+h) szerint.
+%   - Amikor eléri a goal_location-t, a szülőmutatók segítségével rekonstruálja az útvonalat.
+%   - Az útvonal mentén kikeresi azokat a cél cellákat, ahol ütközés van, és azokat hozzáadja A_target-hez.
+%
+% Outputs:
+%   - Az útvonal, amely minimalizálja a céloknál jelentkező ütközések számát.
+*/
 void SingleAgentSolver::findMinimumSetofColldingTargets(vector<int>& goal_table, set<int>& A_target)
 {
     struct Node

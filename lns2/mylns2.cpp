@@ -1,153 +1,524 @@
 #include "mylns2.h"
+#include "config.h"  // For DEFAULT_RERUN_VIEWER_ADDRESS
 #include <iostream>
 #include <random>
 #include "common.h"
 #include <utility>
-
-#include <opencv2/imgproc/imgproc.hpp>
-#include <opencv2/highgui/highgui.hpp>
-#include <cv_bridge/cv_bridge.h>
-#include <sensor_msgs/Image.h>
-#include <visualization_msgs/MarkerArray.h>
-#include <cstdlib>
+#include <cstdlib>  // for std::getenv
 #include <unistd.h>
+#include <chrono>
+#include <thread>
 
-/*
-MyLns2::MyLns2(int seed, vector<vector<vector<int>>> obs_map, vector<pair<int,int>> start_poss, vector<pair<int,int>> goal_poss, int all_ag_num, int map_size)
-    : instance(obs_map, start_poss, goal_poss, all_ag_num, map_size),
+// Init MyLns2 with dynamic map sequence
+MyLns2::MyLns2(int seed,
+               std::vector<std::vector<std::vector<int>>> dynamic_map_seq,
+               std::vector<std::pair<int, int>> start_poss,
+               std::vector<std::pair<int, int>> goal_poss,
+               int all_ag_num,
+               int map_size)
+    : instance(dynamic_map_seq, start_poss, goal_poss, all_ag_num, map_size),
       path_table(map_size * map_size, all_ag_num)
-*/
-      
-MyLns2::MyLns2(int seed, vector<vector<int>> obs_map,vector<pair<int,int>> start_poss, vector<pair<int,int>> goal_poss,int all_ag_num,int map_size):
-    instance(obs_map,start_poss,goal_poss,all_ag_num,map_size),path_table(map_size*map_size, all_ag_num),bag_recorder_pid(-1)  // Initialize bag recorder PID
 {
-    if (myros) {
-        ensure_ros_initialized();
-    
-        if (ros::isInitialized()) {
-            static ros::NodeHandle nh;
-            std::string env_suffix = std::to_string(seed);
-            std::string marker_topic = "/sipp/iteration_markers_" + env_suffix;
-    
-            marker_pub = nh.advertise<visualization_msgs::MarkerArray>(marker_topic, 1, true);
-    
-            // ✅ Only publish the first frame of dynamic map
-            publishMapImage(obs_map, instance.start_locations);
-    
-            // Start recording
-            std::string bag_filename = "/lns2rl/Ros/Bags/sipp_vis_" + env_suffix + ".bag";
-            startBagRecording(bag_filename, marker_topic);
+#if RERUN_ENABLED
+    if (use_rerun) {
+        rec = std::make_shared<rerun::RecordingStream>("rerun_mylns2_" + std::to_string(seed));
+
+        // Check for the viewer address from the environment; if not set, use the default.
+        const char* viewer_addr = std::getenv("RERUN_VIEWER_ADDRESS");
+        if (!viewer_addr) {
+            viewer_addr = DEFAULT_RERUN_VIEWER_ADDRESS;
+        }
+        // In Rerun v0.22.1, there is no connect() method. Instead, we can spawn the viewer.
+        auto spawn_result = rec->spawn();
+        spawn_result.exit_on_failure(); // Abort if spawning fails
+
+        log_prefix = "env_" + std::to_string(seed);
+        if (!map_logged) {
+            // Extract static map from the first frame of the dynamic map sequence
+            // In MAPF: -1 is obstacle, 0 is free space
+            // In GridBasedPathPlanning: 1 is obstacle, 0 is free space
+            // For Rerun visualization: 1 is obstacle, 0 is free space
+            std::vector<std::vector<int>> static_map(dynamic_map_seq[0].size(), std::vector<int>(dynamic_map_seq[0][0].size(), 0));
+
+            // First check if we have any value of 1 in the dynamic map (GridBasedPathPlanning representation)
+            bool has_obstacles_as_1 = false;
+            for (size_t i = 0; i < dynamic_map_seq[0].size() && !has_obstacles_as_1; i++) {
+                for (size_t j = 0; j < dynamic_map_seq[0][0].size() && !has_obstacles_as_1; j++) {
+                    if (dynamic_map_seq[0][i][j] == 1) {
+                        has_obstacles_as_1 = true;
+                        break;
+                    }
+                }
+            }
+
+            // Now extract the static map based on the representation
+            for (size_t i = 0; i < dynamic_map_seq[0].size(); i++) {
+                for (size_t j = 0; j < dynamic_map_seq[0][0].size(); j++) {
+                    if (has_obstacles_as_1) {
+                        // GridBasedPathPlanning representation (1 is obstacle)
+                        if (dynamic_map_seq[0][i][j] == 1) {
+                            static_map[i][j] = 1; // Set as obstacle for Rerun
+                        }
+                    } else {
+                        // MAPF representation (-1 is obstacle)
+                        if (dynamic_map_seq[0][i][j] == -1) {
+                            static_map[i][j] = 1; // Set as obstacle for Rerun
+                        }
+                    }
+                }
+            }
+
+            // Print some debug info about the map
+            int obstacle_count = 0;
+            for (const auto& row : static_map) {
+                for (int cell : row) {
+                    if (cell == 1) obstacle_count++;
+                }
+            }
+            std::cout << "[DEBUG] Static map size: " << static_map.size() << "x" << static_map[0].size() << std::endl;
+            std::cout << "[DEBUG] Static map obstacle count: " << obstacle_count << std::endl;
+            publishMapRerun(static_map, instance.start_locations);
+            map_logged = true;
         }
     }
+#else
+    // Rerun is disabled, set use_rerun to false
+    use_rerun = false;
+    log_prefix = "env_" + std::to_string(seed);
+#endif
 
     srand(seed);
     agents.reserve(all_ag_num);
-    for (int i = 0; i < all_ag_num; i++)
+    for (int i = 0; i < all_ag_num; i++) {
         agents.emplace_back(instance, i, instance.start_locations, instance.goal_locations);
-}
 
-MyLns2::~MyLns2() {
-    if (myros) stopBagRecording();  // Clean up on destruction
-}
-
-void MyLns2::ensure_ros_initialized() {
-    if (!ros::isInitialized()) {
-        int argc = 0;
-        char **argv = nullptr;
-        ros::init(argc, argv, "lns2_pybind_node", ros::init_options::AnonymousName);
-        std::cout << "[ROS] ros::init() called with anonymous name\n";
+#if RERUN_ENABLED
+        // Set the use_rerun flag for each agent's path planner
+        agents[i].path_planner->setUseRerun(use_rerun);
+#endif
     }
 }
 
-void MyLns2::publishMapImage(const std::vector<std::vector<int>>& map,
-    const std::vector<int>& start_locations)
+// Legacy init with static map only
+MyLns2::MyLns2(int seed,
+               std::vector<std::vector<int>> obs_map,
+               std::vector<std::pair<int, int>> start_poss,
+               std::vector<std::pair<int, int>> goal_poss,
+               int all_ag_num,
+               int map_size)
+    : instance(obs_map, start_poss, goal_poss, all_ag_num, map_size),
+      path_table(map_size * map_size, all_ag_num)
 {
-    visualization_msgs::MarkerArray marker_array;
-    int width = map[0].size();
+#if RERUN_ENABLED
+    if (use_rerun) {
+        rec = std::make_shared<rerun::RecordingStream>("rerun_mylns2_" + std::to_string(seed));
+
+        // Check for the viewer address from the environment; if not set, use the default.
+        const char* viewer_addr = std::getenv("RERUN_VIEWER_ADDRESS");
+        if (!viewer_addr) {
+            viewer_addr = DEFAULT_RERUN_VIEWER_ADDRESS;
+        }
+        // In Rerun v0.22.1, there is no connect() method. Instead, we can spawn the viewer.
+        auto spawn_result = rec->spawn();
+        spawn_result.exit_on_failure(); // Abort if spawning fails
+
+        log_prefix = "env_" + std::to_string(seed);
+        if (!map_logged) {
+            // Check if this is a MAPF representation map (-1 for obstacles)
+            bool is_mapf_format = false;
+            for (const auto& row : obs_map) {
+                for (int cell : row) {
+                    if (cell == -1) {
+                        is_mapf_format = true;
+                        break;
+                    }
+                }
+                if (is_mapf_format) break;
+            }
+
+            if (is_mapf_format) {
+                // Convert from MAPF format to Rerun format
+                std::vector<std::vector<int>> rerun_map(obs_map.size(), std::vector<int>(obs_map[0].size(), 0));
+
+                // Count obstacles in original map
+                int orig_obstacle_count = 0;
+                for (const auto& row : obs_map) {
+                    for (int cell : row) {
+                        if (cell == -1) orig_obstacle_count++;
+                    }
+                }
+                std::cout << "[DEBUG] Original map has " << orig_obstacle_count << " obstacles (-1 values)" << std::endl;
+
+                // Convert and count converted obstacles
+                int converted_obstacle_count = 0;
+                for (size_t i = 0; i < obs_map.size(); i++) {
+                    for (size_t j = 0; j < obs_map[i].size(); j++) {
+                        if (obs_map[i][j] == -1) {
+                            rerun_map[i][j] = 1; // Convert -1 to 1 for obstacles
+                            converted_obstacle_count++;
+                        }
+                    }
+                }
+                std::cout << "[DEBUG] Converting MAPF format map to Rerun format" << std::endl;
+                std::cout << "[DEBUG] Converted map has " << converted_obstacle_count << " obstacles (1 values)" << std::endl;
+
+                // Force a small delay to ensure visualization is initialized
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+                publishMapRerun(rerun_map, instance.start_locations);
+            } else {
+                // Use the map as is
+                std::cout << "[DEBUG] Map is already in Rerun format (using 1 for obstacles)" << std::endl;
+                publishMapRerun(obs_map, instance.start_locations);
+            }
+            map_logged = true;
+        }
+    }
+#else
+    // Rerun is disabled, set use_rerun to false
+    use_rerun = false;
+    log_prefix = "env_" + std::to_string(seed);
+#endif
+
+    srand(seed);
+    agents.reserve(all_ag_num);
+    for (int i = 0; i < all_ag_num; i++) {
+        agents.emplace_back(instance, i, instance.start_locations, instance.goal_locations);
+
+#if RERUN_ENABLED
+        // Set the use_rerun flag for each agent's path planner
+        agents[i].path_planner->setUseRerun(use_rerun);
+#endif
+    }
+}
+
+MyLns2::~MyLns2() = default;
+
+
+#if RERUN_ENABLED
+void MyLns2::publishMapRerun(const std::vector<std::vector<int>> &map,
+    const std::vector<int> &start_locations)
+{
+    if (!use_rerun || !rec) return;
+
     int height = map.size();
-    int id = 0;
+    if (height == 0) {
+        std::cout << "[ERROR] Empty map passed to publishMapRerun!" << std::endl;
+        return;
+    }
 
-    // (1) Base map cubes (same as before)...
+    int width = map[0].size();
+    if (width == 0) {
+        std::cout << "[ERROR] Empty map row passed to publishMapRerun!" << std::endl;
+        return;
+    }
 
-    // (2) Count start location overlaps
-    std::unordered_map<int, int> start_counts;
-    for (int loc : start_locations)
-    start_counts[loc]++;
+    // Print debug info about the map
+    int obstacle_count = 0;
+    for (const auto& row : map) {
+        for (int cell : row) {
+            if (cell == 1) obstacle_count++;
+        }
+    }
+    std::cout << "[DEBUG] publishMapRerun - Map size: " << height << "x" << width << std::endl;
+    std::cout << "[DEBUG] publishMapRerun - Obstacle count: " << obstacle_count << std::endl;
 
-    for (const auto& [loc, count] : start_counts) {
-    int x = loc % width;
-    int y = loc / width;
+    // Create a simple grid representation with points
+    std::vector<rerun::components::Position3D> grid_positions;
+    std::vector<rerun::components::Color> grid_colors;
+    std::vector<float> grid_radii;
 
-    visualization_msgs::Marker sphere;
-    sphere.header.frame_id = "map";
-    sphere.header.stamp = ros::Time::now();
-    sphere.ns = "agent_starts";
-    sphere.id = id++;
-    sphere.type = visualization_msgs::Marker::SPHERE;
-    sphere.action = visualization_msgs::Marker::ADD;
-    sphere.pose.position.x = x + 0.5;
-    sphere.pose.position.y = y + 0.5;
-    sphere.pose.position.z = 0.2;
-    sphere.scale.x = 0.4;
-    sphere.scale.y = 0.4;
-    sphere.scale.z = 0.4;
-    sphere.color.a = 1.0;
+    // Create points for ALL cells (both free space and obstacles)
+    for (int y = 0; y < height; y++) {
+        for (int x = 0; x < width; x++) {
+            grid_positions.emplace_back(x + 0.5f, y + 0.5f, -0.1f); // Center of cell, negative z to be below everything else
 
-    if (count > 1) {
-    sphere.color.r = 0.5;  // purple for overlapping
-    sphere.color.g = 0.0;
-    sphere.color.b = 0.5;
+            if (map[y][x] == 0) { // Free space
+                grid_colors.push_back(rerun::components::Color(150, 150, 150, 255)); // Grey for free space
+            } else { // Obstacle
+                grid_colors.push_back(rerun::components::Color(0, 0, 0, 255)); // Black for obstacles
+            }
+
+            grid_radii.push_back(0.49f); // Slightly smaller than full-sized to see grid lines
+        }
+    }
+
+    std::cout << "[DEBUG] Created grid with " << grid_positions.size() << " cells" << std::endl;
+
+    // Log the entire grid with timeline set to 0
+    rec->set_time_sequence("planning_time", 0);
+    rec->log(log_prefix + "/map/static_grid",
+            rerun::Points3D(rerun::Collection<rerun::components::Position3D>(grid_positions))
+            .with_colors(grid_colors)
+            .with_radii(grid_radii));
+
+    // Also log a separate layer just for free space cells with white color
+    std::vector<rerun::components::Position3D> free_positions;
+    std::vector<rerun::components::Color> free_colors;
+    std::vector<float> free_radii;
+
+    for (int y = 0; y < height; y++) {
+        for (int x = 0; x < width; x++) {
+            if (map[y][x] == 0) { // Free space
+                free_positions.emplace_back(x + 0.5f, y + 0.5f, -0.05f); // Slightly above the base grid
+                free_colors.push_back(rerun::components::Color(150, 150, 150, 255)); // Grey for free space
+                free_radii.push_back(0.48f); // Slightly smaller than the base grid
+            }
+        }
+    }
+
+    std::cout << "[DEBUG] Created free space layer with " << free_positions.size() << " cells" << std::endl;
+
+    // Log the free space layer with timeline set to 0
+    if (!free_positions.empty()) {
+        rec->set_time_sequence("planning_time", 0);
+        rec->log(log_prefix + "/map/free_space_layer",
+                rerun::Points3D(rerun::Collection<rerun::components::Position3D>(free_positions))
+                .with_colors(free_colors)
+                .with_radii(free_radii));
+    }
+
+    // Create grid lines to make the map structure more visible
+    std::vector<rerun::components::LineStrip3D> horizontal_lines;
+    std::vector<rerun::components::LineStrip3D> vertical_lines;
+
+    // Create horizontal grid lines
+    for (int y = 0; y <= height; y++) {
+        std::vector<rerun::components::Position3D> line_points;
+        line_points.push_back(rerun::components::Position3D(0, y, 0.01f));
+        line_points.push_back(rerun::components::Position3D(width, y, 0.01f));
+        horizontal_lines.push_back(rerun::components::LineStrip3D(
+            rerun::Collection<rerun::components::Position3D>(line_points)
+        ));
+    }
+
+    // Create vertical grid lines
+    for (int x = 0; x <= width; x++) {
+        std::vector<rerun::components::Position3D> line_points;
+        line_points.push_back(rerun::components::Position3D(x, 0, 0.01f));
+        line_points.push_back(rerun::components::Position3D(x, height, 0.01f));
+        vertical_lines.push_back(rerun::components::LineStrip3D(
+            rerun::Collection<rerun::components::Position3D>(line_points)
+        ));
+    }
+
+    // Log horizontal grid lines with timeline set to 0
+    rec->set_time_sequence("planning_time", 0);
+    rec->log(log_prefix + "/map/grid_lines_horizontal",
+            rerun::LineStrips3D(rerun::Collection<rerun::components::LineStrip3D>(horizontal_lines))
+            .with_colors(std::vector<rerun::components::Color>(horizontal_lines.size(), rerun::components::Color(100, 100, 100, 150))) // Medium gray with transparency
+            .with_radii(std::vector<float>(horizontal_lines.size(), 0.02f)));
+
+    // Log vertical grid lines with timeline set to 0
+    rec->set_time_sequence("planning_time", 0);
+    rec->log(log_prefix + "/map/grid_lines_vertical",
+            rerun::LineStrips3D(rerun::Collection<rerun::components::LineStrip3D>(vertical_lines))
+            .with_colors(std::vector<rerun::components::Color>(vertical_lines.size(), rerun::components::Color(100, 100, 100, 150))) // Medium gray with transparency
+            .with_radii(std::vector<float>(vertical_lines.size(), 0.02f)));
+
+    std::cout << "[DEBUG] Created grid lines: " << horizontal_lines.size() << " horizontal, " << vertical_lines.size() << " vertical" << std::endl;
+
+    // Print the first few rows of the map for debugging
+    std::cout << "[DEBUG] Map content (first 5x5 section):" << std::endl;
+    for (int y = 0; y < std::min(5, height); y++) {
+        std::cout << "  ";
+        for (int x = 0; x < std::min(5, width); x++) {
+            std::cout << map[y][x] << " ";
+        }
+        std::cout << std::endl;
+    }
+
+    // Create points for obstacles with a raised z-coordinate for better visibility
+    std::vector<rerun::components::Position3D> obstacle_positions;
+    std::vector<rerun::components::Color> obstacle_colors;
+    std::vector<float> obstacle_radii;
+
+    for (int y = 0; y < height; y++) {
+        for (int x = 0; x < width; x++) {
+            if (map[y][x] == 1) { // Static obstacle
+                obstacle_positions.emplace_back(x + 0.5f, y + 0.5f, 0.0f);  // At z=0 to be clearly visible
+                obstacle_colors.push_back(rerun::components::Color(0, 0, 0, 255)); // Black with full opacity
+                obstacle_radii.push_back(0.48f); // Almost full-sized
+            }
+        }
+    }
+
+    std::cout << "[DEBUG] Found " << obstacle_positions.size() << " obstacles to visualize" << std::endl;
+
+    if (!obstacle_positions.empty()) {
+        // Force a small delay to ensure visualization is initialized
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+        // Log obstacles in smaller batches to avoid overwhelming Rerun
+        const size_t batch_size = 100;
+        for (size_t i = 0; i < obstacle_positions.size(); i += batch_size) {
+            size_t end = std::min(i + batch_size, obstacle_positions.size());
+            size_t count = end - i;
+
+            std::vector<rerun::components::Position3D> batch_positions;
+            std::vector<rerun::components::Color> batch_colors;
+            std::vector<float> batch_radii;
+
+            for (size_t j = i; j < end; j++) {
+                batch_positions.push_back(obstacle_positions[j]);
+                batch_colors.push_back(obstacle_colors[j]);
+                batch_radii.push_back(obstacle_radii[j]);
+            }
+
+            rec->log(log_prefix + "/map/obstacles_batch_" + std::to_string(i/batch_size),
+                    rerun::Points3D(rerun::Collection<rerun::components::Position3D>(batch_positions))
+                    .with_colors(batch_colors)
+                    .with_radii(batch_radii));
+
+            std::cout << "[DEBUG] Logged obstacle batch " << i/batch_size << " with " << count << " obstacles" << std::endl;
+
+            // Small delay between batches
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+
+        // No additional visualizations needed - we already have the static grid and obstacle points
     } else {
-    sphere.color.r = 0.0;  // green for unique
-    sphere.color.g = 1.0;
-    sphere.color.b = 0.0;
+        std::cout << "[WARNING] No obstacles to visualize!" << std::endl;
+
+        // If no obstacles found, create test obstacles to verify visualization works
+        std::cout << "[DEBUG] Creating test obstacles to verify visualization" << std::endl;
+
+        // Create a 3x3 grid of test obstacles
+        for (int y = 0; y < 3; y++) {
+            for (int x = 0; x < 3; x++) {
+                obstacle_positions.emplace_back(x + 0.5f, y + 0.5f, 0.2f);
+                obstacle_colors.push_back(rerun::components::Color(0, 0, 0)); // Black test obstacles
+                obstacle_radii.push_back(0.45f);
+            }
+        }
+
+        rec->log(log_prefix + "/map/test_obstacle",
+                rerun::Points3D(rerun::Collection<rerun::components::Position3D>(obstacle_positions))
+                .with_colors(obstacle_colors)
+                .with_radii(obstacle_radii));
     }
 
-    marker_array.markers.push_back(sphere);
+    // Log agent start positions (red)
+    std::vector<rerun::components::Position3D> all_start_positions;
+    std::vector<rerun::components::Color> all_start_colors;
+    std::vector<float> all_start_radii;
+
+    for (int loc : start_locations) {
+        int x = loc % width;
+        int y = loc / width;
+        all_start_positions.push_back(rerun::components::Position3D(x + 0.5f, y + 0.5f, 0.05f)); // Above obstacles
+        all_start_colors.push_back(rerun::components::Color(255, 105, 180)); // Pink for start positions
+        all_start_radii.push_back(0.4f);
     }
 
-    marker_pub.publish(marker_array);
-    ros::spinOnce();
-    ros::Duration(0.05).sleep();
+    if (!all_start_positions.empty()) {
+        rec->log(log_prefix + "/agent_starts",
+                rerun::Points3D(rerun::Collection<rerun::components::Position3D>(all_start_positions))
+                .with_colors(all_start_colors)
+                .with_radii(all_start_radii));
+    }
+
+    // Log agent goal positions (green)
+    std::vector<rerun::components::Position3D> all_goal_positions;
+    std::vector<rerun::components::Color> all_goal_colors;
+    std::vector<float> all_goal_radii;
+
+    for (int goal_loc : instance.goal_locations) {
+        int x = goal_loc % width;
+        int y = goal_loc / width;
+        all_goal_positions.push_back(rerun::components::Position3D(x + 0.5f, y + 0.5f, 0.05f)); // Above obstacles
+        all_goal_colors.push_back(rerun::components::Color(0, 0, 255)); // Blue for agent goal positions
+        all_goal_radii.push_back(0.4f);
+    }
+
+    if (!all_goal_positions.empty()) {
+        rec->log(log_prefix + "/agent_goals",
+                rerun::Points3D(rerun::Collection<rerun::components::Position3D>(all_goal_positions))
+                .with_colors(all_goal_colors)
+                .with_radii(all_goal_radii));
+    }
+}
+#else
+void MyLns2::publishMapRerun(const std::vector<std::vector<int>> &map,
+    const std::vector<int> &start_locations)
+{
+    // Empty implementation when Rerun is disabled
+}
+#endif
+
+void MyLns2::visualizeReferencePaths(int current_agent_id)
+{
+#if RERUN_ENABLED
+    if (!use_rerun || !rec) return;
+
+    // Visualize paths of previously planned agents as reference paths (light blue)
+    for (int agent_id = 0; agent_id < (int)agents.size(); agent_id++) {
+        // Skip the current agent and agents without paths
+        if (agent_id == current_agent_id || agents[agent_id].path.empty()) {
+            continue;
+        }
+
+        // Create path positions for this agent
+        std::vector<rerun::components::Position3D> path_positions;
+        for (const auto& step : agents[agent_id].path) {
+            int px = instance.getColCoordinate(step.location);
+            int py = instance.getRowCoordinate(step.location);
+            path_positions.push_back(rerun::components::Position3D(px + 0.5f, py + 0.5f, 0.03f)); // Above obstacles but below agent markers
+        }
+
+        // Skip if path is empty
+        if (path_positions.empty()) {
+            continue;
+        }
+
+        // Create a line strip for the path
+        if (path_positions.size() > 1) {
+            std::vector<rerun::components::LineStrip3D> strips = {
+                rerun::components::LineStrip3D(
+                    rerun::Collection<rerun::components::Position3D>(path_positions)
+                )
+            };
+
+            // Log the path as a line strip (light blue)
+            rec->log(log_prefix + "/reference_paths/agent_" + std::to_string(agent_id),
+                     rerun::LineStrips3D(rerun::Collection<rerun::components::LineStrip3D>(strips))
+                         .with_colors({rerun::components::Color(173, 216, 230)}) // Light blue
+                         .with_radii({0.1f}));
+        }
+    }
+#endif
 }
 
-void MyLns2::startBagRecording(const std::string& filename, const std::string& topic) {
-    pid_t pid = fork();
-    if (pid == 0) {
-        // Child process: setup safe ROS-only LD_LIBRARY_PATH
-        setenv("LD_LIBRARY_PATH", "/opt/ros/noetic/lib", 1);
-
-        execlp("rosbag", "rosbag", "record",
-            "--split",
-            "--size=4096",           // Correct argument: not "--max-bag-size"
-            "-O", filename.c_str(),
-            topic.c_str(),
-            (char*) nullptr);
-
-        std::cerr << "Failed to start rosbag record" << std::endl;
-        std::_Exit(1);
-    } else if (pid > 0) {
-        bag_recorder_pid = pid;
-        std::cout << "[ROS] rosbag record started (pid: " << bag_recorder_pid << ")" << std::endl;
-    } else {
-        std::cerr << "[ROS] Failed to fork rosbag record" << std::endl;
-    }
-}
-
-void MyLns2::stopBagRecording() {
-    if (bag_recorder_pid > 0) {
-        kill(bag_recorder_pid, SIGINT);  // sends Ctrl+C
-        std::cout << "[ROS] rosbag record stopped" << std::endl;
-    }
-}
-
+/*#########################
+% MyLns2::init_pp:
+%
+% Inputs:
+%   - agents: az összes ügynök objektuma, amelyekhez SIPP alapú útvonaltervezést rendelünk.
+%   - instance: a térkép és ügynökök adatait tartalmazza.
+%   - path_table: globális útvonal-tábla, amelybe az egyes ügynökök útvonalait beillesztjük.
+%
+% Function behaviour:
+%   - Minden ügynök id-jét hozzáadja a neighbor.agents listához.
+%   - Ha egy ügynök path_planner-je SIPP típusú, beállítja a log_prefix, rec és use_rerun értékeket.
+%   - Újra feltölti a neighbor.agents listát és véletlenszerű sorrendbe rendezi.
+%   - Létrehoz egy ConstraintTable-t a térkép méretei és a path_table alapján.
+%   - Minden ügynöknél a SIPP-et hívja meg a findPath() függvénnyel, majd ellenőrzi, hogy az útvonal nem üres és a cél megfelelő.
+%   - Beilleszti az útvonalat a path_table-ba, majd a lineáris koordinátákat eltárolja a vector_path-ben.
+%
+% Outputs:
+%   - Az ügynökök inicializált útvonalai bekerülnek a path_table-ba és vector_path-be.
+*/
 void MyLns2::init_pp()
 {
     for (int i = 0; i < (int)agents.size(); i++) {
         neighbor.agents.push_back(i);
         auto* sipp_solver = dynamic_cast<SIPP*>(agents[i].path_planner);
         if (sipp_solver) {
-            sipp_solver->marker_pub = marker_pub;
+            sipp_solver->log_prefix = log_prefix;
+#if RERUN_ENABLED
+            sipp_solver->rec = rec;
+#endif
+            sipp_solver->use_rerun = use_rerun;
         }
     }
     neighbor.agents.reserve(agents.size());
@@ -157,6 +528,29 @@ void MyLns2::init_pp()
     ConstraintTable constraint_table(instance.num_of_cols, instance.map_size, &path_table);
     for (auto id : neighbor.agents)
     {
+#if RERUN_ENABLED
+        if (use_rerun) {
+            // Collect other agents' start positions
+            std::vector<int> other_starts;
+            std::vector<int> other_goals;
+            std::vector<Path> other_paths;
+
+            for (int other_id = 0; other_id < (int)agents.size(); other_id++) {
+                if (other_id != id && !agents[other_id].path.empty()) {
+                    other_starts.push_back(agents[other_id].path_planner->start_location);
+                    other_goals.push_back(agents[other_id].path_planner->goal_location);
+                    other_paths.push_back(agents[other_id].path);
+                }
+            }
+
+            // Set the information for visualization
+            agents[id].path_planner->setOtherAgentsInfo(other_starts, other_goals, other_paths);
+        }
+#endif
+
+        // Visualize reference paths of previously planned agents
+        visualizeReferencePaths(id);
+
         agents[id].path = agents[id].path_planner->findPath(constraint_table);
         // Add this before the assertion
     if (agents[id].path.empty()) {
@@ -181,6 +575,24 @@ void MyLns2::init_pp()
 }
 
 
+/*#########################
+% MyLns2::updateCollidingPairs:
+%
+% Inputs:
+%   - colliding_pairs: egy üres vagy meglévő halmaz, amelybe a konfliktusos ügynök párokat fogja gyűjteni.
+%   - agent_id: az aktuálisan ellenőrzendő ügynök azonosítója.
+%   - path: az adott ügynök aktuális útvonala.
+%
+% Function behaviour:
+%   - Iterál az útvonal időlépésein, és ellenőrzi:
+%       a) Vertex konfliktusokat: ha más ügynök is eléri ugyanazt a cellát egy adott időpillanatban.
+%       b) Edge konfliktusokat: ha két ügynök ellentétes irányban mozog ugyanazon él mentén.
+%       c) Target konfliktusokat: ha az útvonal áthalad egy olyan cellán, ami már más ügynök célja.
+%   - Ha konfliktust talál, hozzáadja a megfelelő ügynök-azonosító párokat a colliding_pairs halmazhoz.
+%
+% Outputs:
+%   - Visszatér egy logikai értékkel, amely jelzi, hogy történt-e konfliktus (true), vagy nem (false).
+*/
 bool MyLns2::updateCollidingPairs(set<pair<int, int>>& colliding_pairs, int agent_id, const Path& path)
 {
     bool succ = false;
@@ -238,6 +650,25 @@ bool MyLns2::updateCollidingPairs(set<pair<int, int>>& colliding_pairs, int agen
     return succ;
 }
 
+
+/*#########################
+% MyLns2::calculate_sipps:
+%
+% Inputs:
+%   - new_agents: egy vektor, amely azoknak az ügynököknek az id-jeit tartalmazza, akik újratervezésre kerülnek.
+%
+% Function behaviour:
+%   - Törli az újratervezésre kijelölt ügynökök útvonalait a path_table-ból.
+%   - Létrehoz egy ConstraintTable-t a frissített path_table-ból.
+%   - Iteratív módon, minden kijelölt ügynöknél meghívja a SIPP-et az új útvonal kiszámolására.
+%   - Ha egy ügynök útvonala üres, fallback stratégiát alkalmaz (pl. a start pozíció mentése).
+%   - Ellenőrzi, hogy az út végén az ügynök célpozíciója egyezik-e a várttal.
+%   - Frissíti a colliding_pairs halmazt, ha az ügynök útvonalán konfliktusok találhatók.
+%   - Az új útvonalakat beilleszti a path_table-ba, és a lineáris koordinátákat eltárolja a sipps_path-ben.
+%
+% Outputs:
+%   - Visszatér a jelenlegi colliding_pairs számával, jelezve, hány konfliktus maradt.
+*/
 int MyLns2::calculate_sipps(vector<int> new_agents)
 {
     neighbor.colliding_pairs.clear();
@@ -252,25 +683,50 @@ int MyLns2::calculate_sipps(vector<int> new_agents)
     while (p != neighbor.agents.end())
     {
         int id = *p;
+
+        // Set other agents' information for visualization
+#if RERUN_ENABLED
+        if (use_rerun) {
+            // Collect other agents' start positions
+            std::vector<int> other_starts;
+            std::vector<int> other_goals;
+            std::vector<Path> other_paths;
+
+            for (int other_id = 0; other_id < (int)agents.size(); other_id++) {
+                if (other_id != id && !agents[other_id].path.empty()) {
+                    other_starts.push_back(agents[other_id].path_planner->start_location);
+                    other_goals.push_back(agents[other_id].path_planner->goal_location);
+                    other_paths.push_back(agents[other_id].path);
+                }
+            }
+
+            // Set the information for visualization
+            agents[id].path_planner->setOtherAgentsInfo(other_starts, other_goals, other_paths);
+        }
+#endif
+
+        // Visualize reference paths of previously planned agents
+        visualizeReferencePaths(id);
+
         agents[id].path = agents[id].path_planner->findPath(constraint_table);
-        
+
         if (agents[id].path.empty()) {
             std::cout << "Warning: No path found for agent " << id << ". Using fallback strategy." << std::endl;
-            
+
             // Fallback strategy options:
             // 1. Keep the agent at its start position
             Path fallback_path;
             fallback_path.push_back(PathEntry(agents[id].path_planner->start_location));
             agents[id].path = fallback_path;
-            
+
             // 2. Or try alternative pathfinding method
             // agents[id].path = findAlternativePath(...);
         }
-        
+
         // Now check that the path ends at the goal (or use an alternative goal if needed)
         if (agents[id].path.back().location != agents[id].path_planner->goal_location) {
-            std::cout << "Warning: Agent " << id << " couldn't reach goal. Path ends at " 
-                      << agents[id].path.back().location << " instead of " 
+            std::cout << "Warning: Agent " << id << " couldn't reach goal. Path ends at "
+                      << agents[id].path.back().location << " instead of "
                       << agents[id].path_planner->goal_location << std::endl;
         }
         if (agents[id].path_planner->num_collisions > 0)
@@ -304,6 +760,25 @@ int MyLns2::calculate_sipps(vector<int> new_agents)
     return (int)neighbor.colliding_pairs.size();
 }
 
+/*#########################
+% MyLns2::single_sipp:
+%
+% Inputs:
+%   - dy_obs_path: Dinamikus akadályként kezelt útvonalak, amelyeket az ügynökök követnek.
+%   - start_poss, goal_poss: Az ügynökök többi részének start és cél koordinátái.
+%   - self_start_poss, self_goal_poss: Az adott ügynök saját start és cél koordinátái.
+%   - global_num_agent: Az összes ügynök száma.
+%
+% Function behaviour:
+%   - Létrehoz egy új ügynök listát (add_agents) és egy útvonal-táblát (add_path_table) a megadott globális ügynökszám alapján.
+%   - Átalakítja a start és cél koordinátákat lineáris indexekké.
+%   - Az első (global_num_agent - 1) ügynök útvonalait a dy_obs_path alapján rögzíti.
+%   - Az utolsó ügynök esetében a SIPP segítségével kiszámolja az új útvonalat a ConstraintTable-t használva.
+%   - Visszatér az utolsó ügynök útvonalának hosszával.
+%
+% Outputs:
+%   - Az utolsó ügynök útvonalának hossza (lépések száma), mint int.
+*/
 int MyLns2::single_sipp(vector<vector<pair<int,int>>> dy_obs_path,vector<pair<int,int>> start_poss, vector<pair<int,int>> goal_poss,
                                   pair<int,int> self_start_poss,pair<int,int> self_goal_poss,int global_num_agent)
 {

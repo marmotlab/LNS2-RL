@@ -102,13 +102,24 @@ public:
 	// int getGoalLocation() const {return instance.goal_locations[agent]; }
 
 	SingleAgentSolver(const Instance& instance, int agent,const vector<int>& start_locations,const vector<int>& goal_locations) :
-		instance(instance), //agent(agent), 
+		instance(instance), //agent(agent),
 		start_location(start_locations[agent]),
 		goal_location(goal_locations[agent]) // initial give value
 	{
 		compute_heuristics();
 	}
 	virtual ~SingleAgentSolver()= default;
+
+#if RERUN_ENABLED
+    // Set the use_rerun flag
+    virtual void setUseRerun(bool use) { use_rerun = use; }
+
+    // Virtual methods for visualization
+    virtual void setOtherAgentsInfo(const std::vector<int>& starts, const std::vector<int>& goals,
+                                  const std::vector<Path>& paths) {}
+    virtual void addSoftCollisionPoint(int location) {}
+    virtual void clearSoftCollisionPoints() {}
+#endif
     void reset()
     {
         if (num_generated > 0)
@@ -129,6 +140,11 @@ protected:
 	int min_f_val; // minimal f value in OPEN
 	// int lower_bound; // Threshold for FOCAL
 	double w = 1; // suboptimal bound
+
+#if RERUN_ENABLED
+    // Rerun visualization flag
+    bool use_rerun = false;
+#endif
 
 	void compute_heuristics();
 };

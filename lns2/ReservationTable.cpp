@@ -1,6 +1,19 @@
 #include "ReservationTable.h"
 
-
+/*#########################
+% insertSoftConstraint2SIT:
+% Inputs:
+%   - location: a cella indexe, amelyre a constraint vonatkozik.
+%   - t_min, t_max: az új constraint időintervallumának kezdete és vége.
+%
+% Function behaviour:
+%   - Iterál a 'sit[location]' (Safe Interval Table a cellára) intervallumain.
+%   - Ha az új intervallum (t_min, t_max) átfedi a meglévő intervallumot (és az aktuális intervallumban nincs ütközés),
+%     akkor frissíti vagy összevonja az intervallumokat úgy, hogy a megadott időablakban a cella ütközést jelöl.
+%
+% Outputs:
+%   - Frissített safe interval lista a 'sit[location]' számára.
+*/
 void ReservationTable::insertSoftConstraint2SIT(int location, int t_min, int t_max)
 {
     assert(t_min >= 0 && t_min < t_max and !sit[location].empty());
@@ -88,6 +101,21 @@ void ReservationTable::insertSoftConstraint2SIT(int location, int t_min, int t_m
 }
 
 // update SIT at the given location
+/*#########################
+% updateSIT:
+% Inputs:
+%   - location: Az adott cella indexe, amelyre a safe interval táblát frissítjük.
+%
+% Function behaviour:
+%   - Ha a cella a célpozíció, két intervallumra osztja: [0, length_min) és [length_min, min(length_max+1, MAX_TIMESTEP)).
+%   - Egyéb cellák esetén létrehoz egy intervallumot [0, min(length_max, MAX_TIMESTEP-1)+1), jelezve, hogy az adott cella kezdetben szabad.
+%   - Ha létezik soft path table (CAT), akkor a cél- vagy élütközések (vertex/edge conflicts) alapján meghívja az insertSoftConstraint2SIT 
+%     függvényt, hogy az adott cella safe interval-jeit frissítse.
+%
+% Outputs:
+%   - A 'sit[location]' listában frissített intervalumokat tartalmaz, melyek figyelembe veszik a statikus akadályokat és
+%     a soft ütközési korlátozásokat (ha van CAT).
+*/
 void ReservationTable::updateSIT(int location)
 {
     assert(sit[location].empty());  //[t_min, t_max), num_of_collisions
@@ -161,6 +189,24 @@ void ReservationTable::updateSIT(int location)
 }
 
 // return <upper_bound, low, high,  vertex collision, edge collision>--algorithm 2
+/*#########################
+% get_safe_intervals:
+% Inputs:
+%   - from, to: az induló és cél cella indexe.
+%   - lower_bound, upper_bound: az intervallum, melyben érkezni kell (pl. curr->timestep+1-tól high_expansion+1-ig).
+%
+% Function behaviour:
+%   - Végigiterál a 'sit[to]' listán, azaz a célcellához tartozó biztonságos intervallumokon.
+%   - Csak azokat az intervallumokat veszi figyelembe, amelyek átfedést mutatnak a [lower_bound, upper_bound) időablakkal.
+%   - Lekéri az adott intervallumon belüli legkorábbi érkezési időt (t1) a get_earliest_arrival_time függvény segítségével.
+%   - Ha az intervallum soft vertex ütközést tartalmaz (get<2>(interval) == true), beállítja az edge collision flag-et is.
+%   - Amennyiben az él mentén nincs ütközés (t1 == t2), az egész intervallumot átfogóan jelöli ütközésmentesnek.
+%   - Ha részeredményként edge collision érzékelhető, két részre osztja az intervallumot.
+%
+% Outputs:
+%   - Lista, mely minden eleme egy tuple:
+%     <upper_bound, low (legkorábbi érkezés), high (legkésőbbi érkezés), vertex_collision flag, edge_collision flag>.
+*/
 list<tuple<int, int, int, bool, bool>> ReservationTable::get_safe_intervals(int from, int to, int lower_bound, int upper_bound)
 {
     list<tuple<int, int, int, bool, bool>> rst;
@@ -202,6 +248,18 @@ list<tuple<int, int, int, bool, bool>> ReservationTable::get_safe_intervals(int 
     return rst;
 }
 
+/*#########################
+% get_first_safe_interval:
+% Inputs:
+%   - location: A cella indexe.
+%
+% Function behaviour:
+%   - Ha a cellához nincs még safe interval, hívja az updateSIT-t.
+%   - Visszaadja a safe interval lista első elemét.
+%
+% Outputs:
+%   - Az első (legkorábbi) safe interval az adott cellához.
+*/
 Interval ReservationTable::get_first_safe_interval(size_t location)
 {
     if (sit[location].empty())  // if this location does not has safe interval
@@ -209,7 +267,23 @@ Interval ReservationTable::get_first_safe_interval(size_t location)
     return sit[location].front();  // return the first element of list
 }
 
+
 // find a new safe interval with t_min as given from exit interval
+/*#########################
+% find_safe_interval:
+% Inputs:
+%   - interval (referenciaként): A megtalálandó safe interval kimeneti értéke.
+%   - location: Az adott cella indexe.
+%   - t_min: Az alsó időhatár, amelytől keresünk.
+%
+% Function behaviour:
+%   - Végigiterál a safe interval listán a megadott cellához, és ha t_min benne van egy intervallumban,
+%     beállítja az interval kimenetet, majd visszatér igaz értékkel.
+%   - Ha nem talál megfelelő intervallumot, hamissal tér vissza.
+%
+% Outputs:
+%   - Boolean érték, amely jelzi, hogy sikerült-e megtalálni a megfelelő safe intervallumot.
+*/
 bool ReservationTable::find_safe_interval(Interval& interval, size_t location, int t_min)
 {
 	if (t_min >= min(constraint_table.length_max, MAX_TIMESTEP - 1) + 1)
@@ -229,6 +303,19 @@ bool ReservationTable::find_safe_interval(Interval& interval, size_t location, i
     return false;
 }
 
+/*#########################
+% get_earliest_arrival_time:
+% Inputs:
+%   - from, to: Kezdő és cél cellák.
+%   - lower_bound, upper_bound: Az intervallum, melyben az érkezésnek meg kell történnie.
+%
+% Function behaviour:
+%   - Iterál az időablakban és visszaadja a legkisebb olyan időpontot, amikor
+%     a constraint_table koncepciója szerint nincs tilalom.
+%
+% Outputs:
+%   - A legkorábbi érkezési idő (ha nincs, -1-et ad vissza).
+*/
 int ReservationTable::get_earliest_arrival_time(int from, int to, int lower_bound, int upper_bound) const
 {
     for (auto t = lower_bound; t < upper_bound; t++)  // lower bound:the earlist step can reach the location;upper_bound: the maximum length can stay on the location
@@ -239,6 +326,20 @@ int ReservationTable::get_earliest_arrival_time(int from, int to, int lower_boun
     return -1;
 }
 
+/*#########################
+% get_earliest_no_collision_arrival_time:
+% Inputs:
+%   - from, to: Kezdő és cél cellák.
+%   - interval: Az aktuális safe interval.
+%   - lower_bound, upper_bound: Az érkezési időablak.
+%
+% Function behaviour:
+%   - Megkeresi azt a legkorábbi időpontot az adott intervallumban, amikor
+%     az él mentén nincs ütközés (hasEdgeConflict).
+%
+% Outputs:
+%   - A legkorábbi érkezési idő, ahol az él ütközésmentes; ha nem találja, -1-et ad vissza.
+*/
 int ReservationTable::get_earliest_no_collision_arrival_time(int from, int to, const Interval& interval,
                                                              int lower_bound, int upper_bound) const
 {

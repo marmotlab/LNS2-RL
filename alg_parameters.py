@@ -15,7 +15,7 @@ class EnvParameters:
     
     N_ACTIONS = 5  # Number of discrete actions available.
     EPISODE_LEN = [356, 356, 356] # Episode length (number of timesteps per episode) for each curriculum level.
-    FOV_SIZE = 9  # Field-of-view size (observations are extracted from a square of this size).
+    FOV_SIZE = 7  # Field-of-view size (observations are extracted from a square of this size).
     WORLD_SIZE_LIST = [64,96,128] # List of possible grid sizes. To use a 64x64 grid, include 64.
     OBSTACLE_PROB_LIST = [(0.05,0.075,0.1),(0.1,0.125,0.15),(0.15,0.175,0.2)] # Obstacle probabilities for each curriculum level.
     
@@ -59,7 +59,7 @@ class TrainingParameters:
     N_EPOCHS = 10
     N_ENVS = 1 # 6 # number of processes  # original: 32
     N_MAX_STEPS = 7e7  # maximum number of time steps used in training
-    N_STEPS = 2 ** 8  # number of time steps per process per data collection
+    N_STEPS = 2 ** 4  # number of time steps per process per data collection
     MINIBATCH_SIZE =int(2**9)
     ITERATION_LIMIT_LIST=[30,65,100]
     opti_eps=1e-5

@@ -3,7 +3,7 @@
 
 
 // Currently only works for undirected unweighted 4-nighbor grids
-class Instance 
+class Instance
 {
 public:
 	int num_of_cols;
@@ -13,25 +13,33 @@ public:
     vector<int> goal_locations;
     int num_of_agents;
 
-    // ✅ Store full dynamic map sequence [t][row][col]
+    // Store full dynamic map sequence [t][row][col]
     std::vector<std::vector<std::vector<int>>> dynamic_map_seq;
 
 	Instance()=default;
-    /*
+
+    // Constructor with dynamic map sequence
     Instance(const std::vector<std::vector<std::vector<int>>>& grid_sequence,
         const std::vector<std::pair<int, int>>& start_poss,
         const std::vector<std::pair<int, int>>& goal_poss,
         int num_of_agents, int num_of_rows);
-        */
 
+    // Legacy constructor with static map only
     Instance(const vector<vector<int>>& obs_map, const vector<pair<int,int>>& start_poss, const vector<pair<int,int>>& goal_poss,int num_of_agents,int num_of_rows);
 
-    inline bool validMove(int curr, int next) const
+    // Check if a move is valid at a specific time step
+    inline bool validMove(int curr, int next, int timestep = 0) const
     {
         if (next < 0 || next >= map_size)
             return false;
+
+        // Check static obstacles
         if (my_map[next])  // =1 obstacle
             return false;
+
+        // Dynamic obstacles (radar zones) are now soft constraints, so we don't block the path here
+        // We'll handle them with a cost factor in getDynamicObstacleCost
+
         return getManhattanDistance(curr, next) < 2;  // if one step
     }
     list<int> getNeighbors(int curr) const;
@@ -53,9 +61,40 @@ public:
     // Returns a constant reference to the map data.
     const vector<bool>& getMap() const { return my_map; }
 
-    // ✅ Check if a cell is a radar zone at a specific time
-    bool isRadarZone(int timestep, int row, int col) const;
-    
+    // Check if a cell has a dynamic obstacle at a specific time
+    bool hasDynamicObstacle(int timestep, int row, int col) const;
+
+    // Get the cost of moving through a dynamic obstacle (radar zone)
+    // Returns 3 if there's a dynamic obstacle, 1 otherwise
+    inline int getDynamicObstacleCost(int timestep, int row, int col) const {
+        if (!dynamic_map_seq.empty() && timestep < dynamic_map_seq.size()) {
+            if (row >= 0 && row < num_of_rows && col >= 0 && col < num_of_cols) {
+                if (dynamic_map_seq[timestep][row][col] == 2) // Dynamic obstacle (radar zone)
+                    return 3; // Higher cost for radar zones
+            }
+        }
+        return 1; // Normal cost
+    }
+
+    // Get the cost of moving to a location at a specific time
+    inline int getMoveCost(int curr, int next, int timestep) const {
+        if (next < 0 || next >= map_size)
+            return INT_MAX; // Invalid move
+
+        if (my_map[next]) // Static obstacle
+            return INT_MAX; // Invalid move
+
+        int row = getRowCoordinate(next);
+        int col = getColCoordinate(next);
+        return getDynamicObstacleCost(timestep, row, col);
+    }
+
+    // Check if we have dynamic map data
+    bool hasDynamicMapData() const { return !dynamic_map_seq.empty(); }
+
+    // Get the number of time steps in the dynamic map sequence
+    size_t getNumTimeSteps() const { return dynamic_map_seq.size(); }
+
 private:
 	  // int moves_offset[MOVE_COUNT];
 	  vector<bool> my_map;
@@ -65,7 +104,7 @@ private:
       bool loadMap(const vector<vector<int>>& obs_map);
       bool loadAgents(const vector<pair<int,int>>& start_poss, const vector<pair<int,int>>& goal_poss);
 
-	  // Class  SingleAgentSolver can access private members of Node 
+	  // Class  SingleAgentSolver can access private members of Node
 	  friend class SingleAgentSolver;
 };
 

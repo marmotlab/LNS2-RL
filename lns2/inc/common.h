@@ -50,7 +50,8 @@ typedef std::chrono::duration<float> fsec;
 struct PathEntry
 {
 	int location = -1;
-	explicit PathEntry(int loc = -1) { location = loc; }
+	int timestep = 0;
+	explicit PathEntry(int loc = -1, int time = 0) { location = loc; timestep = time; }
 };
 
 typedef vector<PathEntry> Path;

@@ -17,7 +17,11 @@ using namespace std;
 
 PYBIND11_MODULE(my_lns2, m) {
     py::class_<MyLns2>(m, "MyLns2")
+            // Legacy constructor with static map only
             .def(py::init<int, vector<vector<int>>,vector<pair<int,int>>,vector<pair<int,int>>,int,int>())
+            // New constructor with dynamic map sequence
+            .def(py::init<int, vector<vector<vector<int>>>,vector<pair<int,int>>,vector<pair<int,int>>,int,int>())
+            .def("setUseRerun", &MyLns2::setUseRerun, "Enable or disable Rerun visualization")
             .def("init_pp", &MyLns2::init_pp)
             .def("calculate_sipps", &MyLns2::calculate_sipps)
             .def("single_sipp", &MyLns2::single_sipp)
@@ -26,4 +30,3 @@ PYBIND11_MODULE(my_lns2, m) {
             .def_readwrite("makespan", &MyLns2::makespan);
 }
 
-// .def(py::init<int, vector<vector<vector<int>>>, vector<pair<int,int>>, vector<pair<int,int>>, int, int>())

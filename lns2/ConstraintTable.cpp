@@ -1,5 +1,18 @@
 #include "ConstraintTable.h"
 
+/*
+% ConstraintTable::getLastCollisionTimestep:
+%
+% Inputs:
+%   - location: A cella indexe.
+%
+% Behavior:
+%   - Ha elérhető (path_table_for_CAT nem nullptr), visszaadja a
+%     path_table_for_CAT->getLastCollisionTimestep(location) értéket.
+%
+% Outputs:
+%   - Az utolsó ütközési (érkezési) időpont, vagy -1, ha nem található.
+*/
 int ConstraintTable::getLastCollisionTimestep(int location) const
 {
     int rst = -1;
@@ -8,12 +21,13 @@ int ConstraintTable::getLastCollisionTimestep(int location) const
     return rst;
 }
 
-
+// - Jelenleg mindig false értékkel tér vissza  (nincs explicit constraint ellenőrzés).
 bool ConstraintTable::constrained(size_t curr_loc, size_t next_loc, int next_t) const
 {
     return false;
 }
 
+//  Másolja a constraint paramétereke
 void ConstraintTable::copy(const ConstraintTable& other)
 {
 	length_min = other.length_min;
@@ -23,7 +37,7 @@ void ConstraintTable::copy(const ConstraintTable& other)
     path_table_for_CAT = other.path_table_for_CAT;
 }
 
-
+//  Ellenőrzi, hogy a path_table_for_CAT alapján élütközés van-e a két cella között.
 bool ConstraintTable::hasEdgeConflict(size_t curr_id, size_t next_id, int next_timestep) const
 {
     assert(curr_id != next_id);
@@ -31,6 +45,8 @@ bool ConstraintTable::hasEdgeConflict(size_t curr_id, size_t next_id, int next_t
         return true;
     return false;
 }
+
+//  Visszaadja a path_table_for_CAT alapján a jövőbeni ütközések számát.
 int ConstraintTable::getFutureNumOfCollisions(int loc, int t) const
 {
     int rst = 0;
@@ -40,6 +56,7 @@ int ConstraintTable::getFutureNumOfCollisions(int loc, int t) const
 }
 
 // return the earliest timestep that the agent can hold the location
+// Jelenleg visszaadja az earliest_timestep értéket.
 int ConstraintTable::getHoldingTime( int earliest_timestep) const
 {
     // path table

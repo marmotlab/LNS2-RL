@@ -27,7 +27,7 @@ class CL_MAPFEnv(gym.Env):
     It integrates core components from WarehouseEnvironment (such as static map generation
     and dynamic obstacle updates) with the MAPF planning and RL logic.
     """
-    
+
     def __init__(self, env_id,
                  global_num_agents_range=EnvParameters.GLOBAL_N_AGENT_LIST,
                  fov_size=EnvParameters.FOV_SIZE,
@@ -35,7 +35,7 @@ class CL_MAPFEnv(gym.Env):
                  prob=EnvParameters.OBSTACLE_PROB_LIST,
                  im_flag=False):
         """Initialization of the environment.
-        
+
         Parameters:
           env_id: Environment identifier.
           global_num_agents_range: List of possible agent counts.
@@ -53,31 +53,60 @@ class CL_MAPFEnv(gym.Env):
         self.im_flag = im_flag
 # ______________________________________________________________________________________________________________________
         # WarehouseEnvironment logic for dynamic obstacles and grid creation is integrated later.
-        self.amr_count = 10
-        self.max_amr = 10
-        self.FRAMES = 200
+        self.amr_count = 16
+        self.max_amr = 16
+        self.FRAMES = 420
         self.curriculum = 100
-        
+
     def set_grid(self, static_map, map_idx, add_num_dyn_obj, FRAMES):
         self.map_idx = map_idx
-        self.map_a=np.asarray(static_map)
-        # Convert to 0 / 1 for GridMapEnv
-        map_for_env = (self.map_a == -1).astype(np.float32)
-        # Convert 2D map to a 3-channel map (each cell becomes [value, value, value])
-        rgb_map = np.stack([map_for_env] * 3, axis=-1)
-        self.map_v = map_to_value(rgb_map)
+        self.map_a = np.asarray(static_map)
+
+        # Convert from MAPF representation (-1 for obstacles, 0 for free)
+        # to GridBasedPathPlanning representation (1 for obstacles, 0 for free)
+        # Simply convert -1 to 1 for obstacles
+
+        # Create a copy of the map and convert -1 to 1 for obstacles
+        self.map_v = self.map_a.copy()
+        self.map_v[self.map_v == -1] = 1
+
+        # Save this conversion for debugging
+        debug_dir = "debug_maps"
+        os.makedirs(debug_dir, exist_ok=True)
+
+        # Initialize the grid with the converted map
         self.grid.SetStaticGrid(self.map_v)
         self.grid.ClearGrid(gridtype="grid_dynamic")
-        self.grid.addRandomDynamicObstacles(no_of_obs=add_num_dyn_obj, d_range=(1,6), alpha = 0.4)
+        # Add more dynamic obstacles (radar zones) with larger size for drone environment
+        self.grid.addRandomDynamicObstacles(no_of_obs=add_num_dyn_obj, d_range=(2, 7), alpha=0.4)
         self.frames = FRAMES
         self.grid.ResetDynamicObstacles()
         self.grid_seq = self.grid.GenerateGridSequence(self.frames, reset_after=True)
-        self.grid.RenderAllObstacles(typ='static')
+        self.grid.RenderAllObstacles(typ="static")
         self.grid.RenderAllObstacles(typ="dynamic")
         self.grid.RenderGrid()
-        Image.fromarray((self.grid.grid * 255).astype(np.uint8)).save("debug_maps/raw_grid_env_1.png")
+
+        # Generate the RGB representation using GridToRGB
         self.init_arr = GridToRGB(self.grid.grid)
-        
+
+        # Save the visualization using init_arr (already in RGB format)
+        debug_dir = "debug_maps"
+        os.makedirs(debug_dir, exist_ok=True)
+        vis_path = f"{debug_dir}/grid_vis_{map_idx}.png"
+        Image.fromarray(self.init_arr.astype(np.uint8)).save(vis_path)
+        print(f"[DEBUG] Saved grid visualization to: {vis_path}")
+
+        # Print basic debug info
+        print(f"[DEBUG] Grid shape: {self.grid.grid.shape}, unique values: {np.unique(self.grid.grid)}")
+
+        # Print debug information about the grid
+        print(f"[DEBUG] Grid static shape: {self.grid.grid_static.shape}")
+        print(f"[DEBUG] Grid static unique values: {np.unique(self.grid.grid_static)}")
+        print(f"[DEBUG] Grid dynamic shape: {self.grid.grid_dynamic.shape}")
+        print(f"[DEBUG] Grid dynamic unique values: {np.unique(self.grid.grid_dynamic)}")
+        print(f"[DEBUG] Grid sequence shape: {self.grid_seq.shape}")
+        print(f"[DEBUG] Grid sequence unique values: {np.unique(self.grid_seq)}")
+
         print("🧠 DEBUG: init_arr shape:", self.init_arr.shape)
         print("🧠 DEBUG: init_arr dtype:", self.init_arr.dtype)
         print("🧠 DEBUG: init_arr min/max:", np.min(self.init_arr), np.max(self.init_arr))
@@ -100,11 +129,11 @@ class CL_MAPFEnv(gym.Env):
             'reward': 0,
             'total_arrived': 0
         }
-        
+
     def reGenerateAndAdd(self):
         self.grid.addRandomDynamicObstacles(no_of_obs=1, d_range=(1,4), alpha = 0.4)
         self.grid_seq = self.grid.GenerateGridSequence(self.frames, reset_after=True)
-        
+
     def update_dyn_map(self, step = 1):
         """
         Update dynamic obstacles and merge them with the static map to produce an effective map.
@@ -116,38 +145,126 @@ class CL_MAPFEnv(gym.Env):
         self.grid.RenderAllObstacles(typ="dynamic")
         self.grid.RenderGrid()
         self.init_arr = GridToRGB(self.grid.grid)
-    
-    @staticmethod    
-    def save_debug_map(env_id, init_arr, grid_seq):
-        """Save debug versions of the initial RGB array and first dynamic grid frame."""
+
+
+    def debug_dynamic(self, num_steps=10, did='d1'):
+        """
+        Debug function to visualize dynamic obstacle movement over multiple steps.
+        Generates a sequence of images showing the dynamic obstacles moving.
+
+        Args:
+            num_steps: Number of steps to visualize
+            did: Debug ID to differentiate between multiple debug runs
+        """
+        print(f"[DEBUG] Visualizing dynamic obstacle movement for {num_steps} steps...")
+
+        # Create debug directory
+        debug_dir = "debug_maps/debug_dynamic"
+        os.makedirs(debug_dir, exist_ok=True)
+
+        # Reset dynamic obstacles to initial state
+        self.grid.ResetDynamicObstacles()
+
+        # Generate sequence of images
+        for step in range(num_steps):
+            # Clear dynamic grid and render obstacles
+            self.grid.ClearGrid(gridtype="grid_dynamic")
+            self.grid.RenderAllObstacles(typ="dynamic")
+            self.grid.RenderGrid()
+
+            # Generate RGB representation
+            rgb_grid = GridToRGB(self.grid.grid)
+
+            # Add agent start positions (red)
+            for row, col in self.start_list:
+                if 0 <= row < rgb_grid.shape[0] and 0 <= col < rgb_grid.shape[1]:
+                    rgb_grid[row, col] = [255, 0, 0]  # Red
+
+            # Add agent goal positions (blue)
+            for row, col in self.goal_list:
+                if 0 <= row < rgb_grid.shape[0] and 0 <= col < rgb_grid.shape[1]:
+                    rgb_grid[row, col] = [0, 0, 255]  # Blue
+
+            # Save image
+            img_path = f"{debug_dir}/dynamic_step_{did}_{step}.png"
+            Image.fromarray(rgb_grid.astype(np.uint8)).save(img_path)
+            print(f"[DEBUG] Saved dynamic visualization for step {step} to: {img_path}")
+
+            # Step dynamic obstacles
+            self.grid.StepDynamicObstacles()
+
+        # Reset dynamic obstacles to initial state
+        self.grid.ResetDynamicObstacles()
+        self.grid.ClearGrid(gridtype="grid_dynamic")
+        self.grid.RenderAllObstacles(typ="dynamic")
+        self.grid.RenderGrid()
+        print(f"[DEBUG] Dynamic obstacle visualization complete. Images saved to {debug_dir}/")
+
+    def convert_grid_seq_for_mylns2(self, grid_seq):
+        """
+        Convert a grid sequence from GridBasedPathPlanning to a format suitable for mylns2.
+
+        Args:
+            grid_seq: 3D tensor [frames, height, width] from grid.GenerateGridSequence()
+
+        Returns:
+            3D tensor [frames, height, width] where:
+            - 0 represents free cells
+            - 1 represents static obstacles
+            - 2 represents dynamic obstacles
+        """
+        frames, height, width = grid_seq.shape
+        converted_seq = np.zeros((frames, height, width), dtype=np.int32)
+
+        # Use the init_arr RGB representation to identify cell types
+        # White [255, 255, 255] -> Free cells (0)
+        # Black [0, 0, 0] -> Static obstacles (1)
+        # Green [0, 255, 101] -> Dynamic obstacles (2)
+        # Purple [203, 0, 255] -> Multiple dynamic obstacles (2)
+
+        # Extract static obstacles from init_arr
+        static_mask = np.all(self.init_arr == [0, 0, 0], axis=2)
+
+        # Extract dynamic obstacles from init_arr
+        dynamic_green_mask = np.all(self.init_arr == [0, 255, 101], axis=2)
+        dynamic_purple_mask = np.all(self.init_arr == [203, 0, 255], axis=2)
+        summed_mask = dynamic_green_mask | dynamic_purple_mask
+
+        # Create debug directory if needed
         debug_dir = "debug_maps"
         os.makedirs(debug_dir, exist_ok=True)
 
-        # Save the RGB image (init_arr)
-        img_path = os.path.join(debug_dir, f"init_arr_env_{env_id}.png")
-        if init_arr.dtype == np.float32 or init_arr.max() <= 1.0:
-            img = (init_arr * 255).astype(np.uint8)
-        else:
-            img = init_arr.astype(np.uint8)
-        Image.fromarray(img).save(img_path)
-        print(f"[DEBUG] Saved init_arr RGB image to: {img_path}")
+        for t in range(frames):
+            # Start with free cells everywhere
+            converted_seq[t] = 0
 
-        # Save the first frame of the dynamic map (grid_seq[0]) as .npy
-        grid_path = os.path.join(debug_dir, f"first_frame_env_{env_id}.npy")
-        np.save(grid_path, np.array(grid_seq[0]))
-        print(f"[DEBUG] Saved first frame of dynamic map to: {grid_path}")
+            # Mark static obstacles
+            converted_seq[t][static_mask] = 1
 
-        # Optionally save the first frame as RGB image too
-        first_frame_rgb = GridToRGB(grid_seq[0])
-        rgb_path = os.path.join(debug_dir, f"first_frame_rgb_env_{env_id}.png")
-        Image.fromarray(first_frame_rgb).save(rgb_path)
-        print(f"[DEBUG] Saved first frame RGB image to: {rgb_path}")
-    
+            # Mark dynamic obstacles from the current frame
+            # In GridBasedPathPlanning, dynamic obstacles have values > 1
+            converted_seq[t][summed_mask] = 2
+
+            # Save a visualization of the first frame for debugging
+            if t == 0:
+                # Create RGB visualization of the converted sequence
+                conv_vis = np.zeros((height, width, 3), dtype=np.uint8)
+                conv_vis[converted_seq[t] == 0] = [255, 255, 255]  # Free cells -> White
+                conv_vis[converted_seq[t] == 1] = [0, 0, 0]        # Static obstacles -> Black
+                conv_vis[converted_seq[t] == 2] = [0, 255, 101]    # Dynamic obstacles -> Green
+                Image.fromarray(conv_vis).save(f"{debug_dir}/converted_frame0.png")
+
+        # Print basic debug information
+        print(f"[DEBUG] Converted dynamic map: frames={frames}, shape={height}x{width}")
+        print(f"[DEBUG] Static obstacles: {np.sum(static_mask)}, Dynamic obstacles in first frame: {np.sum(summed_mask)}")
+
+        return converted_seq
+
 # ______________________________________________________________________________________________________________________
-    
+
     def global_set_world(self, cl_num_task):
         """Randomly generate a new task (i.e. a MAPF instance).
-        
+
         This method generates:
           - A random static grid (map) with obstacles.
           - Random start positions for all agents.
@@ -193,7 +310,7 @@ class CL_MAPFEnv(gym.Env):
         self.episode_len = EnvParameters.EPISODE_LEN[task_set]
         # Compute the total number of agents as a function of grid size and a random multiplier
         self.global_num_agent = int(round(random.choice(self.global_num_agents_range[cl_num_task]) * self.size * self.size))
-        
+
         # Create a random static grid: cells are 0 (free) or -1 (obstacle)
         self.map = -(np.random.rand(int(self.size), int(self.size)) < prob).astype(int)
         # Copy the map to fix state (used for later visualization or reference)
@@ -230,8 +347,8 @@ class CL_MAPFEnv(gym.Env):
                 goals[x, y] = goal_counter + 1
                 self.goal_list.append((x, y))
                 goal_counter += 1
-                
-        
+
+
         self.grid = GridMapEnv(grid_size=(self.height, self.width)) # Create the Grid environment
         # Initialize map
         # self.set_grid(self.map, self.env_id, self.amr_count, self.FRAMES)
@@ -241,7 +358,7 @@ class CL_MAPFEnv(gym.Env):
     def joint_move(self, actions):
         """
         Execute simultaneous moves for all agents and update the world state.
-        
+
         The method:
           - Updates the world state based on the current time step and dynamic obstacles.
           - For agents that are not in local control, updates their position using the pre-computed paths.
@@ -253,7 +370,7 @@ class CL_MAPFEnv(gym.Env):
             self.world.state = self.dynamic_state.state[self.time_step] + self.map
         else:
             self.world.state = self.dynamic_state.state[-1] + self.map
-        
+
         # For non-local agents, use their planned path.
         for i in range(self.global_num_agent):
             if i not in self.world.local_agents:
@@ -343,13 +460,13 @@ class CL_MAPFEnv(gym.Env):
     def observe(self, local_agent_index):
         """
         Return a single agent's observation.
-        
+
         This method extracts a local field-of-view (FOV) around the agent's current position,
         and constructs various maps (goal, obstacles, agent positions, dynamic obstacles, etc.)
         that together form the observation input for the RL agent.
         """
         agent_index = self.world.local_agents[local_agent_index]
-        
+
         # Determine boundaries for the FOV window around the agent.
         top_poss = max(self.world.agents_poss[agent_index][0] - self.fov_size // 2, 0)
         bottom_poss = min(self.world.agents_poss[agent_index][0] + self.fov_size // 2 + 1, self.size)
@@ -362,7 +479,7 @@ class CL_MAPFEnv(gym.Env):
         FOV_left = max(self.fov_size // 2 - self.world.agents_poss[agent_index][1], 0)
         FOV_bottom = FOV_top + (bottom_poss - top_poss)
         FOV_right = FOV_left + (right_poss - left_poss)
-        
+
         obs_shape = (self.fov_size, self.fov_size)
         # Initialize various maps for the observation.
         goal_map = np.zeros(obs_shape)           # Map for agent's own goal.
@@ -378,7 +495,7 @@ class CL_MAPFEnv(gym.Env):
         blank_map = np.zeros(obs_shape)
         occupy_map = np.zeros(obs_shape)
         next_step_map = np.zeros((EnvParameters.K_STEPS, self.fov_size, self.fov_size))
-        
+
         # Determine time window for planned path (SIPPS path) extraction.
         if self.time_step - EnvParameters.WINDOWS < 0:
             min_time = 0
@@ -388,7 +505,7 @@ class CL_MAPFEnv(gym.Env):
             min_time = self.time_step - EnvParameters.WINDOWS
         max_time = min(self.time_step + EnvParameters.WINDOWS, len(self.sipps_path[local_agent_index]))
         window_path = self.sipps_path[local_agent_index][min_time:max_time]
-        
+
         # Mark the agent's own goal if it falls within the FOV.
         if self.goal_list[agent_index][0] in range(top_poss, bottom_poss) and self.goal_list[agent_index][1] in range(left_poss, right_poss):
             goal_map[self.goal_list[agent_index][0] - top_left[0],
@@ -403,7 +520,7 @@ class CL_MAPFEnv(gym.Env):
         # Set utility maps based on current space utilization.
         util_map[FOV_top:FOV_bottom, FOV_left:FOV_right] = self.space_ulti_vertex[top_poss:bottom_poss, left_poss:right_poss]
         util_map_action[:, FOV_top:FOV_bottom, FOV_left:FOV_right] = self.space_ulti_action[:, top_poss:bottom_poss, left_poss:right_poss]
-        
+
         # Loop over each pixel in the FOV to adjust occupancy and other maps.
         for i in range(top_left[0], top_left[0] + self.fov_size):
             for j in range(top_left[1], top_left[1] + self.fov_size):
@@ -515,7 +632,7 @@ class CL_MAPFEnv(gym.Env):
     def predict_next(self):
         """
         Predict the next positions along the SIPPS path for each local agent.
-        
+
         For each local agent, this method calculates future positions (up to K_STEPS)
         based on the current time step and the SIPPS planned path. If the current time step is 0,
         it defaults to the next positions in the SIPPS path.
@@ -565,7 +682,7 @@ class CL_MAPFEnv(gym.Env):
     def update_ulti(self):
         """
         Update space utilization maps based on future dynamic states.
-        
+
         This method computes two maps:
           - space_ulti_action: a weighted map of actions based on future dynamic obstacle usage.
           - space_ulti_vertex: a weighted map of occupancy.
@@ -591,7 +708,7 @@ class CL_MAPFEnv(gym.Env):
     def joint_step(self, actions):
         """
         Execute a joint action for all local agents and compute the resulting reward.
-        
+
         This method:
           1. Increments the time step and performs joint_move to update agent positions.
           2. Updates space utilization maps.
@@ -602,7 +719,7 @@ class CL_MAPFEnv(gym.Env):
         """
         # Step the dynamic obstacles before processing agent actions:
         self.update_dyn_map(1)
-    
+
         self.time_step += 1
         dynamic_collision_status, agent_collision_status, reach_goal_status = self.joint_move(actions)
 
@@ -611,7 +728,7 @@ class CL_MAPFEnv(gym.Env):
         obs = np.zeros((1, self.local_num_agents, NetParameters.NUM_CHANNEL, EnvParameters.FOV_SIZE, EnvParameters.FOV_SIZE), dtype=np.float32)
         vector = np.zeros((1, self.local_num_agents, NetParameters.VECTOR_LEN), dtype=np.float32)
         next_valid_actions = []
-        
+
         # Compute rewards for each local agent based on space utilization maps.
         for i in range(self.local_num_agents):
             rewards[:, i] += EnvParameters.OVERALL_WEIGHT * EnvParameters.UTI_WEIGHT[1] * self.space_ulti_vertex[self.world.local_agents_poss[i]]
@@ -621,7 +738,7 @@ class CL_MAPFEnv(gym.Env):
         # Update utility maps and predict next positions.
         self.update_ulti()
         self.predict_next()
-        
+
         # For each local agent, add collision and goal-based rewards.
         for i in range(self.local_num_agents):
             rewards[:, i] += EnvParameters.DY_COLLISION_COST * dynamic_collision_status[i]
@@ -678,15 +795,17 @@ class CL_MAPFEnv(gym.Env):
     def _global_reset(self, cl_num_task):
         # Reinitialize the MAPF task (this call resets start/goal positions, etc.)
         self.global_set_world(cl_num_task)
-        
+
         # Step the dynamic obstacles before processing agent actions:
         self.set_grid(self.map, self.env_id, self.amr_count, self.FRAMES)
+        # Generate RGB representation
+        rgb_grid = GridToRGB(self.grid.grid)
         # Save raw static map as RGB for comparison
-        Image.fromarray((self.init_arr).astype(np.uint8)).save(f"debug_maps/static_map_env_{self.env_id}.png")
-        
+        Image.fromarray((rgb_grid).astype(np.uint8)).save(f"debug_maps/static_map_env_{self.env_id}.png")
+
         print("[DEBUG] Grid object count after static setup:", len(self.grid.objects))
         print("[DEBUG] Static grid has nonzero elements:", np.count_nonzero(self.grid.grid_static))
-        
+
         print("🔍 DEBUG: Checking grid/map characteristics before MyLns2...")
 
         # Static 2D map (was previously passed to LNS2)
@@ -702,11 +821,18 @@ class CL_MAPFEnv(gym.Env):
 
         # First frame (what you're passing now)
         print("→ First frame slice (t=0):\n", self.grid_seq[0][:5, :5])
-        # 🧠 Save for visual & numerical debugging
-        self.save_debug_map(self.env_id, self.init_arr, self.grid_seq)   
-        
-        # Initialize the LNS2 planner with the current map and agent data.
-        self.lns2_model = my_lns2.MyLns2(self.env_id * 123, self.map, self.start_list, self.goal_list, self.global_num_agent, self.map.shape[0])
+
+        self.debug_dynamic(did='d1')
+
+        # Convert the grid sequence for mylns2
+        converted_grid_seq = self.convert_grid_seq_for_mylns2(self.grid_seq)
+
+        self.debug_dynamic(did='d2')
+
+        # Debug visualization is now handled by debug_dynamic
+
+        # Initialize the LNS2 planner with the dynamic map sequence
+        self.lns2_model = my_lns2.MyLns2(self.env_id * 123, converted_grid_seq, self.start_list, self.goal_list, self.global_num_agent, self.map.shape[0])
         self.lns2_model.init_pp()
         self.paths = self.lns2_model.vector_path
         # Initialize dynamic state for the agents based on the planned paths.
@@ -719,7 +845,7 @@ class CL_MAPFEnv(gym.Env):
     def _local_reset(self, local_num_agents, first_time):
         """
         Reset the environment locally for a subset of agents (local agents).
-        
+
         This method:
           1. Selects a random subset of agents from the global set.
           2. Resets the time step and previous action information.
@@ -729,7 +855,7 @@ class CL_MAPFEnv(gym.Env):
         """
         # Step the dynamic obstacles before processing agent actions:
         self.update_dyn_map(0)
-        
+
         self.local_num_agents = local_num_agents
         new_agents = random.sample(range(self.global_num_agent), local_num_agents)
         self.time_step = 0

@@ -6,8 +6,8 @@
 #include <cstdlib>
 #include <unistd.h>
 
-// 🔁 Replace ROS with Rerun
-#include <rerun.hpp>
+// Include Rerun configuration
+#include "rerun_config.h"
 
 class SIPPNode: public LLNode
 {
@@ -92,15 +92,47 @@ public:
     std::vector<int> current_best_path;
     // A container holding pointers to nodes currently in the focal list.
     std::list<LLNode*> focal_list_container;
-    
-    // Other visualization-related members...
-    int num_expanded;  // for example, number of nodes expanded
+
+    // Visualization-related members
+    int num_expanded;  // number of nodes expanded
+
+    // For enhanced visualization
+#if RERUN_ENABLED
+    // Other agents' information for visualization
+    std::vector<int> other_agents_starts;  // Start positions of other agents
+    std::vector<int> other_agents_goals;   // Goal positions of other agents
+    std::vector<Path> other_agents_paths;  // Paths of other agents
+    std::vector<int> soft_collision_points; // Points where soft collisions occur
+
+    // Override virtual methods from SingleAgentSolver
+    void setOtherAgentsInfo(const std::vector<int>& starts, const std::vector<int>& goals,
+                           const std::vector<Path>& paths) override {
+        if (!use_rerun) return;
+        other_agents_starts = starts;
+        other_agents_goals = goals;
+        other_agents_paths = paths;
+    }
+
+    void addSoftCollisionPoint(int location) override {
+        if (!use_rerun) return;
+        soft_collision_points.push_back(location);
+    }
+
+    void clearSoftCollisionPoints() override {
+        if (!use_rerun) return;
+        soft_collision_points.clear();
+    }
+#endif
 
 	SIPP(const Instance& instance, int agent,const vector<int>& start_locations,const vector<int>& goal_locations):
 		SingleAgentSolver(instance, agent,start_locations,goal_locations) {}
 
 	// Visualization flags
-    bool use_rerun = true;
+    bool use_rerun = false;
+	string log_prefix = "default_env";
+#if RERUN_ENABLED
+	std::shared_ptr<rerun::RecordingStream> rec;
+#endif
 
 private:
 	// define typedefs and handles for heap

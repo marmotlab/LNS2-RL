@@ -1,6 +1,22 @@
 #include "PathTable.h"
 
-
+/*#########################
+% insertPath (int agent_id, const Path& path):
+%
+% Inputs:
+%   - agent_id: az ügynök azonosítója.
+%   - path: Az ügynök által megtervezett időindexelt útvonal.
+%
+% Behavior:
+%   - Az adott ügynök útvonalát rögzíti a 'paths' vektorban.
+%   - Minden időpillanatban (t) a cella (path[t].location) számára 
+%     hozzáadja az ügynök azonosítóját a 'table' megfelelő pozíciójához.
+%   - A cél cellánál a 'goals' értéket beállítja az út hossza - 1-re.
+%   - Frissíti a makespan értékét.
+%
+% Outputs:
+%   - Frissített path table és goals, makespan.
+*/
 void PathTableWC::insertPath(int agent_id, const Path& path)
 {
     paths[agent_id] = &path;
@@ -17,12 +33,36 @@ void PathTableWC::insertPath(int agent_id, const Path& path)
     makespan = max(makespan, (int) path.size() - 1);
 }
 
+/*#########################
+% insertPath (int agent_id):
+%
+% Inputs:
+%   - agent_id: az ügynök azonosítója, melynek útvonalát már elmentettük a 'paths'-ban.
+% Behavior:
+%   - Ellenőrzi, hogy paths[agent_id] nem üres,
+%     majd meghívja a fenti insertPath(int, const Path&) függvényt.
+% Outputs:
+%   - A paths beillesztése megtörténik.
+*/
 void PathTableWC::insertPath(int agent_id)
 {
     assert(paths[agent_id] != nullptr);
     insertPath(agent_id, *paths[agent_id]);
 }
 
+/*#########################
+% deletePath (int agent_id):
+%
+% Inputs:
+%   - agent_id: az ügynök azonosítója, amelynek útvonalát törölni kell.
+% Behavior:
+%   - Iterál az ügynök útvonalán (Path), és minden időpillanatból
+%     eltávolítja az ügynök azonosítóját a 'table'-ből.
+%   - A cél cella esetében reseteli a goals értékét (MAX_TIMESTEP).
+%   - Ha az aktuális makespan megegyezik az ügynök útvonalhosszával, újraszámolja a makespan értékét.
+% Outputs:
+%   - Eltávolítja az ügynök útvonalát a path table-ból, frissítve a goals és makespan értékeket.
+*/
 void PathTableWC::deletePath(int agent_id)
 {
     const Path & path = *paths[agent_id];
@@ -48,6 +88,18 @@ void PathTableWC::deletePath(int agent_id)
     }
 }
 
+/*#########################
+% getFutureNumOfCollisions:
+%
+% Inputs:
+%   - loc: A cella indexe.
+%   - time: Az időpillanat, után mely ütközéseket számoljuk.
+% Behavior:
+%   - Iterál a 'table[loc]' safe interval listán az adott időpont után,
+%     és összeadja az egyes időlépésekben szereplő ügynökök számát.
+% Outputs:
+%   - Az ütközések száma (az érkező ügynökök mennyisége) a jövőben az adott cellában.
+*/
 int PathTableWC::getFutureNumOfCollisions(int loc, int time) const
 {
     assert(goals[loc] == MAX_TIMESTEP);
@@ -60,6 +112,20 @@ int PathTableWC::getFutureNumOfCollisions(int loc, int time) const
     return rst;
 }
 
+/*#########################
+% hasEdgeCollisions:
+%
+% Inputs:
+%   - from, to: Két szomszédos cella indexe.
+%   - to_time: Az időpillanat, amikor a mozgás befejeződik.
+%
+% Behavior:
+%   - Ellenőrzi, hogy az 'from' cellából a 'to' cellába való mozgás során
+%     van-e olyan ügynök, amelyik időben konfliktusba kerül (edge conflict).
+%
+% Outputs:
+%   - True, ha van élütközés, egyébként false.
+*/
 bool PathTableWC::hasEdgeCollisions(int from, int to, int to_time) const
 {
     if (!table.empty() && from != to && table[to].size() >= to_time && table[from].size() > to_time)
@@ -76,6 +142,17 @@ bool PathTableWC::hasEdgeCollisions(int from, int to, int to_time) const
     return false;
 }
 
+/*#########################
+% getLastCollisionTimestep:
+%
+% Inputs:
+%   - location: A cella indexe.
+% Behavior:
+%   - Visszafelé iterál az adott cella 'table' bejegyzésein, és az első időpillanatot adja vissza,
+%     amikor legalább egy ügynök elérte a cellát.
+% Outputs:
+%   - Az utolsó ütközési (érkezési) időpillanat, vagy -1, ha nincs ütközés.
+*/
 int PathTableWC::getLastCollisionTimestep(int location) const
 {
     if (table.empty())
