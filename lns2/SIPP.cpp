@@ -42,12 +42,28 @@ void SIPP::updatePath(const LLNode* goal, vector<PathEntry> &path)
 	{
 		const auto* prev = curr->parent;
 		int t = prev->timestep + 1;
+
+		// Count consecutive waits for debugging
+		int consecutive_waits = 0;
+
 		while (t < curr->timestep)
 		{
 			path[t].location = prev->location; // wait at prev location
 			path[t].timestep = t; // set the timestep
+			consecutive_waits++;
 			t++;
 		}
+
+		// Log if there are many consecutive waits (for debugging)
+		if (consecutive_waits > 2) {
+		    std::cout << "Agent waited for " << consecutive_waits
+		              << " consecutive timesteps at location " << prev->location << std::endl;
+
+		    // Just log the waiting without trying to check neighbors
+		    // This avoids accessing private members and conversion issues
+		    std::cout << "  Note: Long waiting detected - this might be avoidable with better path planning" << std::endl;
+		}
+
 		path[curr->timestep].location = curr->location; // move to curr location
 		path[curr->timestep].timestep = curr->timestep; // set the timestep
 		curr = prev;
@@ -160,9 +176,11 @@ Path SIPP::findPath(const ConstraintTable& constraint_table)
                 std::reverse(temp_path.begin(), temp_path.end());
 
                 // Log the current timestep for debugging
-                std::cout << "[DEBUG] Current planning timestep: " << curr->timestep << " (iteration " << iteration << ")" << std::endl;
+                // std::cout << "[DEBUG] Current planning timestep: " << curr->timestep << " (iteration " << iteration << ")" << std::endl;
 
-                // Visualize the current state
+                // Visualize the current state with the current planning timestep
+                // This is the key point: we pass the current node's timestep to the visualization
+                // so that dynamic obstacles are shown at their positions for that timestep
                 rerunVisualization(iteration, temp_path);
             }
 #endif
@@ -224,19 +242,25 @@ Path SIPP::findPath(const ConstraintTable& constraint_table)
                 continue;
             }
 
-            // Check for dynamic obstacles (soft constraints) and mark them for visualization
-#if RERUN_ENABLED
-            if (use_rerun && instance.hasDynamicMapData()) {
+            // Check for dynamic obstacles (soft constraints)
+            // This part should always run, regardless of visualization settings
+            if (instance.hasDynamicMapData()) {
                 int next_row = instance.getRowCoordinate(next_location);
                 int next_col = instance.getColCoordinate(next_location);
 
-                // If there's a dynamic obstacle, mark it as a soft collision point
+                // If there's a dynamic obstacle, mark it as a soft collision point for visualization
                 if (next_time < instance.getNumTimeSteps() &&
                     instance.hasDynamicObstacle(next_time, next_row, next_col)) {
-                    addSoftCollisionPoint(next_location);
+#if RERUN_ENABLED
+                    // Only add to visualization if enabled
+                    if (use_rerun) {
+                        addSoftCollisionPoint(next_location);
+                    }
+#endif
+                    // Note: The actual cost handling is done by getMoveCost, not here
+                    // This section is just for visualization and tracking
                 }
             }
-#endif
 
             for (auto & i : reservation_table.get_safe_intervals(
                     curr->location, next_location, curr->timestep + 1, curr->high_expansion + 1)) // algorithm 2
@@ -258,6 +282,24 @@ Path SIPP::findPath(const ConstraintTable& constraint_table)
                 auto next_h_val = max(my_heuristic[next_location], (next_collisions > 0?
                     holding_time : curr->getFVal()) - next_timestep); // path max
 
+                // Check if this is a waiting action
+                int consecutive_waits = 0;
+                if (curr->location == next_location) {
+                    // This is a waiting action, increment consecutive waits
+                    consecutive_waits = 1;  // Default to 1 for a single wait
+
+                    // Try to get the parent's consecutive waits if it's a SIPPNode
+                    if (auto* sipp_curr = dynamic_cast<const SIPPNode*>(curr)) {
+                        consecutive_waits = sipp_curr->consecutive_waits + 1;
+                    }
+
+                    // Apply extra penalty for excessive waiting
+                    if (consecutive_waits > 3) {
+                        // Add extra cost for waiting
+                        move_cost += (consecutive_waits - 3) * 2;
+                    }
+                }
+
                 // Generate node with the adjusted g-value (using move_cost instead of 1)
                 auto next = new SIPPNode(next_location,
                                          curr->g_val + move_cost, // Use move_cost instead of just incrementing by 1
@@ -267,7 +309,8 @@ Path SIPP::findPath(const ConstraintTable& constraint_table)
                                          next_high_generation,
                                          next_high_expansion,
                                          next_v_collision,
-                                         next_collisions);
+                                         next_collisions,
+                                         consecutive_waits);
                 // try to retrieve it from the hash table
                 if (dominanceCheck(next))
                     pushNodeToFocal(next);
@@ -285,9 +328,34 @@ Path SIPP::findPath(const ConstraintTable& constraint_table)
             auto next_collisions = curr->num_of_conflicts +
                     // (int)curr->collision_v * max(next_timestep - curr->timestep - 1, 0) +
 		    (int)get<2>(interval);
-            auto next = new SIPPNode(curr->location, next_timestep, next_h_val, curr, next_timestep,
-                                     get<1>(interval), get<1>(interval), get<2>(interval),
-                                     next_collisions);
+
+            // Calculate consecutive waits for this waiting node
+            int consecutive_waits = next_timestep - curr->timestep;  // Default calculation
+
+            // Try to get the parent's consecutive waits if it's a SIPPNode
+            if (auto* sipp_curr = dynamic_cast<const SIPPNode*>(curr)) {
+                consecutive_waits += sipp_curr->consecutive_waits;
+            }
+
+            // If this would create a node with too many consecutive waits,
+            // make it even more expensive by artificially increasing the g-value
+            int extra_wait_penalty = 0;
+            if (consecutive_waits > 3) {
+                // Apply an exponential penalty for excessive waiting
+                extra_wait_penalty = (consecutive_waits - 3) * 4;
+                // std::cout << "Applied extra wait penalty of " << extra_wait_penalty << " for " << consecutive_waits << " consecutive waits" << std::endl;
+            }
+
+            auto next = new SIPPNode(curr->location,
+                                     curr->g_val + (next_timestep - curr->timestep) * 4 + extra_wait_penalty, // Add extra penalty to g-value
+                                     next_h_val,
+                                     curr,
+                                     next_timestep,
+                                     get<1>(interval),
+                                     get<1>(interval),
+                                     get<2>(interval),
+                                     next_collisions,
+                                     consecutive_waits);
             next->wait_at_goal = (curr->location == goal_location);
             if (dominanceCheck(next))
                 pushNodeToFocal(next);
@@ -310,14 +378,17 @@ Path SIPP::findPath(const ConstraintTable& constraint_table)
             if (use_rerun) {
                 // Log the current timestep for debugging
                 if (!partial_path.empty()) {
-                    std::cout << "[DEBUG] Partial path visualization with " << partial_path.size() << " steps, ending at timestep " << partial_path.back().timestep << " (iteration " << iteration << ")" << std::endl;
+                    // std::cout << "[DEBUG] Partial path visualization with " << partial_path.size() << " steps, ending at timestep " << partial_path.back().timestep << " (iteration " << iteration << ")" << std::endl;
                 } else {
-                    std::cout << "[DEBUG] Empty partial path at iteration " << iteration << std::endl;
+                    // std::cout << "[DEBUG] Empty partial path at iteration " << iteration << std::endl;
                 }
+                // Visualize the current state with the current planning timestep
+                // This ensures dynamic obstacles are shown at their positions for the current timestep
                 rerunVisualization(iteration, partial_path);
 
-                // Also add a short sleep to allow the viewer to update.
-                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                // Add a sleep to allow the viewer to update and make the simulation more real-time.
+                // Use the configurable visualization_delay parameter
+                std::this_thread::sleep_for(std::chrono::milliseconds(visualization_delay));
             }
         }
 #endif
@@ -344,10 +415,10 @@ Path SIPP::findPath(const ConstraintTable& constraint_table)
 #if RERUN_ENABLED
     if (use_rerun && rec) {
         if (!path.empty()) {
-            std::cout << "[DEBUG] Final path visualization with " << path.size() << " steps, ending at timestep " << path.back().timestep << " (final iteration " << iteration << ")" << std::endl;
+            // std::cout << "[DEBUG] Final path visualization with " << path.size() << " steps, ending at timestep " << path.back().timestep << " (final iteration " << iteration << ")" << std::endl;
             rerunVisualization(iteration, path);
         } else {
-            std::cout << "[DEBUG] No path found, showing final state" << std::endl;
+            // std::cout << "[DEBUG] No path found, showing final state" << std::endl;
             // Even if no path was found, show the final state of the search
             rerunVisualization(iteration, path);
         }
@@ -442,14 +513,39 @@ bool SIPP::dominanceCheck(SIPPNode* new_node)
         return true;
     for (auto & old_node : ptr->second)  // ptr->second: hash value
     {
+        // Check if the nodes have significantly different waiting patterns
+        int old_consecutive_waits = old_node->consecutive_waits;
+        int new_consecutive_waits = new_node->consecutive_waits;
+
+        // If one node has significantly more waits than the other, prefer the one with fewer waits
+        if (old_consecutive_waits > new_consecutive_waits + 2) {
+            // Old node has significantly more waits - replace it with new node
+            if (old_node->in_openlist) // the old node has not been expanded yet
+                eraseNodeFromLists(old_node); // delete it from open and/or focal lists
+            else // the old node has been expanded already
+                num_reopened++; //re-expand it
+            useless_nodes.push_back(old_node);
+            ptr->second.remove(old_node);
+            num_generated--; // this is because we later will increase num_generated when we insert the new node into lists.
+            return true;
+        }
+        else if (new_consecutive_waits > old_consecutive_waits + 2) {
+            // New node has significantly more waits - keep old node, discard new
+            return false;
+        }
+
+        // Standard dominance rules
         if (old_node->timestep <= new_node->timestep and
             old_node->num_of_conflicts <= new_node->num_of_conflicts)
-        { // the new node is dominated by the old node, no need to generate new node
+        {
+            // The new node is dominated by the old node
             return false;
         }
         else if (old_node->timestep >= new_node->timestep and
-                old_node->num_of_conflicts >= new_node->num_of_conflicts) // the old node is dominated by the new node
-        { // delete the old node
+                old_node->num_of_conflicts >= new_node->num_of_conflicts)
+        {
+            // The old node is dominated by the new node
+            // Delete the old node
             if (old_node->in_openlist) // the old node has not been expanded yet
                 eraseNodeFromLists(old_node); // delete it from open and/or focal lists
             else // the old node has been expanded already
@@ -482,26 +578,24 @@ void SIPP::rerunVisualization(int iteration, const Path& path)
 {
     if (!use_rerun || !rec) return;
 
+    // Add a small delay to ensure visualization is smooth
+    // Use a fraction of the main visualization_delay
+    std::this_thread::sleep_for(std::chrono::milliseconds(visualization_delay / 6));
+
     int width  = instance.num_of_cols;
     int height = instance.num_of_rows;
 
     std::vector<rerun::components::Position3D> open_pts, closed_pts;
 
-    // Get the current timestep from the path or use the last valid timestep
+    // Get the current planning timestep from the path
+    // This is the key change: we need to use the current planning timestep
+    // to correctly visualize dynamic obstacles at their positions for that timestep
     int current_timestep = 0;
 
-    // Store the last valid timestep across all iterations for consistent visualization
-    static int global_last_valid_timestep = 0;
-
     // If we have a path, use the timestep from the last node in the path
+    // This represents the current planning step being considered
     if (!path.empty()) {
         current_timestep = path.back().timestep;
-        if (current_timestep > 0) {
-            global_last_valid_timestep = current_timestep;
-        }
-    } else if (iteration > 0) {
-        // If we don't have a path but we're in a later iteration, use the last valid timestep
-        current_timestep = global_last_valid_timestep;
     }
 
     // Set the timeline for this visualization
@@ -516,7 +610,7 @@ void SIPP::rerunVisualization(int iteration, const Path& path)
         // Make sure we don't exceed the available timesteps
         int num_timesteps = static_cast<int>(instance.getNumTimeSteps());
 
-        // Use the exact timestep from the current node being expanded
+        // Use the exact timestep from the current planning step
         // This ensures dynamic obstacles are shown at the correct planning step
         int timestep_to_use = current_timestep;
 
@@ -524,11 +618,7 @@ void SIPP::rerunVisualization(int iteration, const Path& path)
         if (timestep_to_use < 0) timestep_to_use = 0;
         if (timestep_to_use >= num_timesteps) timestep_to_use = num_timesteps - 1;
 
-        // Always update the visualization at every iteration to ensure consistency
-        // This ensures dynamic obstacles are always shown, even if the timestep hasn't changed
-
         // Create a separate entity for each timestep's dynamic obstacles
-        // This way they're consistently visualized at each planning step
         std::vector<rerun::components::Position3D> dynamic_obstacle_pts;
         std::vector<rerun::components::Color> dynamic_obstacle_colors;
         std::vector<float> dynamic_obstacle_radii;
@@ -561,67 +651,27 @@ void SIPP::rerunVisualization(int iteration, const Path& path)
         timestep_pos.push_back(rerun::components::Position3D(width / 2.0f, -1.0f, 1.0f));
 
         std::vector<std::string> timestep_labels;
-        timestep_labels.push_back("Timestep: " + std::to_string(timestep_to_use));
+        timestep_labels.push_back("Planning Timestep: " + std::to_string(timestep_to_use));
 
         rec->log(log_prefix + "/sipp/timestep_indicator",
-                rerun::Points3D(rerun::Collection<rerun::components::Position3D>(timestep_pos))
+                rerun::Points3D()
+                    .with_positions(timestep_pos)
                     .with_colors({rerun::components::Color(255, 255, 255)})
                     .with_radii({0.1f})
                     .with_labels(timestep_labels));
 
         // Log dynamic obstacles with a lighter green color
         if (!dynamic_obstacle_pts.empty()) {
-            std::cout << "[DEBUG] Visualizing " << obstacle_count << " dynamic obstacles at timestep " << timestep_to_use << " (iteration " << iteration << ")" << std::endl;
-
-            // Set a specific timeline key for this visualization to ensure consistency
-            rec->set_time_sequence("planning_time", iteration);
-
-            // Clear previous dynamic obstacles
-            rec->log(log_prefix + "/sipp/dynamic_obstacles", rerun::Clear());
+            // std::cout << "[DEBUG] Visualizing " << obstacle_count << " dynamic obstacles at timestep " << timestep_to_use << " (iteration " << iteration << ")" << std::endl;
 
             // Log the dynamic obstacles for this timestep
             rec->log(log_prefix + "/sipp/dynamic_obstacles",
-                    rerun::Points3D(rerun::Collection<rerun::components::Position3D>(dynamic_obstacle_pts))
+                    rerun::Points3D()
+                        .with_positions(dynamic_obstacle_pts)
                         .with_colors(dynamic_obstacle_colors)
                         .with_radii(dynamic_obstacle_radii));
-
-            // Add a visual trail to show the movement of dynamic obstacles
-            // This helps visualize how they move over time
-            static std::vector<rerun::components::Position3D> trail_pts;
-            static std::vector<rerun::components::Color> trail_colors;
-            static std::vector<float> trail_radii;
-            static int last_timestep = -1;
-
-            // Only update the trail when the timestep changes
-            if (timestep_to_use != last_timestep) {
-                // Add the current dynamic obstacles to the trail with a faded color
-                for (size_t i = 0; i < dynamic_obstacle_pts.size(); i++) {
-                    trail_pts.push_back(dynamic_obstacle_pts[i]);
-                    // Use a more transparent green for the trail
-                    trail_colors.push_back(rerun::components::Color(0, 200, 0, 100)); // Semi-transparent green
-                    trail_radii.push_back(0.3f); // Smaller radius for trail points
-                }
-
-                // Limit the trail size to avoid performance issues
-                const size_t max_trail_size = 1000;
-                if (trail_pts.size() > max_trail_size) {
-                    trail_pts.erase(trail_pts.begin(), trail_pts.begin() + (trail_pts.size() - max_trail_size));
-                    trail_colors.erase(trail_colors.begin(), trail_colors.begin() + (trail_colors.size() - max_trail_size));
-                    trail_radii.erase(trail_radii.begin(), trail_radii.begin() + (trail_radii.size() - max_trail_size));
-                }
-
-                last_timestep = timestep_to_use;
-            }
-
-            // Log the trail
-            if (!trail_pts.empty()) {
-                rec->log(log_prefix + "/sipp/dynamic_obstacles_trail",
-                        rerun::Points3D(rerun::Collection<rerun::components::Position3D>(trail_pts))
-                            .with_colors(trail_colors)
-                            .with_radii(trail_radii));
-            }
         } else {
-            std::cout << "[WARNING] No dynamic obstacles found at timestep " << timestep_to_use << " (iteration " << iteration << ")" << std::endl;
+            // std::cout << "[DEBUG] No dynamic obstacles found at timestep " << timestep_to_use << " (iteration " << iteration << ")" << std::endl;
         }
     }
 
@@ -631,18 +681,20 @@ void SIPP::rerunVisualization(int iteration, const Path& path)
     int start_y = instance.getRowCoordinate(start_location);
     start_pos.push_back(rerun::components::Position3D(start_x + 0.5f, start_y + 0.5f, 0.3f));
     rec->log(log_prefix + "/sipp/agent_start",
-             rerun::Points3D(rerun::Collection<rerun::components::Position3D>(start_pos))
+             rerun::Points3D()
+                 .with_positions(start_pos)
                  .with_colors({rerun::components::Color(255, 105, 180)}) // Pink
                  .with_radii({0.4f}));
 
-    // Log agent goal position (green)
+    // Log current agent's goal position (yellow to highlight it's the active planning goal)
     std::vector<rerun::components::Position3D> goal_pos;
     int goal_x = instance.getColCoordinate(goal_location);
     int goal_y = instance.getRowCoordinate(goal_location);
     goal_pos.push_back(rerun::components::Position3D(goal_x + 0.5f, goal_y + 0.5f, 0.3f));
     rec->log(log_prefix + "/sipp/agent_goal",
-             rerun::Points3D(rerun::Collection<rerun::components::Position3D>(goal_pos))
-                 .with_colors({rerun::components::Color(0, 0, 255)}) // Blue
+             rerun::Points3D()
+                 .with_positions(goal_pos)
+                 .with_colors({rerun::components::Color(255, 255, 0)}) // Yellow for current agent's goal
                  .with_radii({0.4f}));
 
     // Log other agents' start positions (brown)
@@ -663,7 +715,7 @@ void SIPP::rerunVisualization(int iteration, const Path& path)
                      .with_radii(std::vector<float>(other_starts.size(), 0.3f)));
     }
 
-    // Log other agents' goal positions (pink)
+    // Log other agents' goal positions (blue)
     if (!other_agents_goals.empty()) {
         std::vector<rerun::components::Position3D> other_goals;
         std::vector<rerun::components::Color> other_goal_colors;
@@ -672,7 +724,7 @@ void SIPP::rerunVisualization(int iteration, const Path& path)
             int x = instance.getColCoordinate(loc);
             int y = instance.getRowCoordinate(loc);
             other_goals.push_back(rerun::components::Position3D(x + 0.5f, y + 0.5f, 0.3f));
-            other_goal_colors.push_back(rerun::components::Color(165, 42, 42)); // Brown
+            other_goal_colors.push_back(rerun::components::Color(0, 0, 255)); // Blue for other agents' goals
         }
 
         rec->log(log_prefix + "/sipp/other_goals",

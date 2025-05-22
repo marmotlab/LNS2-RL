@@ -13,6 +13,7 @@ opposite_actions = {0: -1, 1: 3, 2: 4, 3: 1, 4: 2, 5: 7, 6: 8, 7: 5, 8: 6}
 
 # "CIMBIBOY includes" – additional imports from WarehouseEnvironment code
 import os
+import re
 from PIL import Image, ImageDraw
 import matplotlib as plt
 from GridBasedPathPlanning.RL_Environment.environment.map_generator import map_to_value
@@ -33,7 +34,8 @@ class CL_MAPFEnv(gym.Env):
                  fov_size=EnvParameters.FOV_SIZE,
                  size=EnvParameters.WORLD_SIZE_LIST,
                  prob=EnvParameters.OBSTACLE_PROB_LIST,
-                 im_flag=False):
+                 im_flag=False,
+                 enable_visualization=True):
         """Initialization of the environment.
 
         Parameters:
@@ -51,6 +53,7 @@ class CL_MAPFEnv(gym.Env):
         self.PROB = prob      # Obstacle density options
         self.env_id = env_id
         self.im_flag = im_flag
+        self.enable_visualization = enable_visualization  # Flag to control visualization
 # ______________________________________________________________________________________________________________________
         # WarehouseEnvironment logic for dynamic obstacles and grid creation is integrated later.
         self.amr_count = 16
@@ -94,23 +97,7 @@ class CL_MAPFEnv(gym.Env):
         os.makedirs(debug_dir, exist_ok=True)
         vis_path = f"{debug_dir}/grid_vis_{map_idx}.png"
         Image.fromarray(self.init_arr.astype(np.uint8)).save(vis_path)
-        print(f"[DEBUG] Saved grid visualization to: {vis_path}")
 
-        # Print basic debug info
-        print(f"[DEBUG] Grid shape: {self.grid.grid.shape}, unique values: {np.unique(self.grid.grid)}")
-
-        # Print debug information about the grid
-        print(f"[DEBUG] Grid static shape: {self.grid.grid_static.shape}")
-        print(f"[DEBUG] Grid static unique values: {np.unique(self.grid.grid_static)}")
-        print(f"[DEBUG] Grid dynamic shape: {self.grid.grid_dynamic.shape}")
-        print(f"[DEBUG] Grid dynamic unique values: {np.unique(self.grid.grid_dynamic)}")
-        print(f"[DEBUG] Grid sequence shape: {self.grid_seq.shape}")
-        print(f"[DEBUG] Grid sequence unique values: {np.unique(self.grid_seq)}")
-
-        print("🧠 DEBUG: init_arr shape:", self.init_arr.shape)
-        print("🧠 DEBUG: init_arr dtype:", self.init_arr.dtype)
-        print("🧠 DEBUG: init_arr min/max:", np.min(self.init_arr), np.max(self.init_arr))
-        print("🧠 DEBUG: init_arr sample:\n", self.init_arr[0:3, 0:3])
 
         self.initial_random_steps = False
         self.was_reached = False
@@ -200,65 +187,48 @@ class CL_MAPFEnv(gym.Env):
         self.grid.RenderGrid()
         print(f"[DEBUG] Dynamic obstacle visualization complete. Images saved to {debug_dir}/")
 
-    def convert_grid_seq_for_mylns2(self, grid_seq):
+    def debug_gridmap(self, converted_grid_seq, marker = "base"):
         """
-        Convert a grid sequence from GridBasedPathPlanning to a format suitable for mylns2.
+        Debug function to visualize the first 3 timesteps (0, 1, 2) of the dynamic map array.
 
         Args:
-            grid_seq: 3D tensor [frames, height, width] from grid.GenerateGridSequence()
-
-        Returns:
-            3D tensor [frames, height, width] where:
-            - 0 represents free cells
-            - 1 represents static obstacles
-            - 2 represents dynamic obstacles
+            converted_grid_seq: 3D numpy array of shape (420, 96, 96) containing dynamic obstacle data
         """
-        frames, height, width = grid_seq.shape
-        converted_seq = np.zeros((frames, height, width), dtype=np.int32)
+        print("################################################################")
+        print("Visualizing timesteps 0, 1, 2 of dynamic map array...")
+        print(f"Dynamic map shape: {converted_grid_seq.shape}")
+        print("################################################################")
 
-        # Use the init_arr RGB representation to identify cell types
-        # White [255, 255, 255] -> Free cells (0)
-        # Black [0, 0, 0] -> Static obstacles (1)
-        # Green [0, 255, 101] -> Dynamic obstacles (2)
-        # Purple [203, 0, 255] -> Multiple dynamic obstacles (2)
+        # Verify the shape of the dynamic map
+        if len(converted_grid_seq.shape) != 3:
+            print(f"[ERROR] Expected 3D array, got shape {converted_grid_seq.shape}")
+            return
 
-        # Extract static obstacles from init_arr
-        static_mask = np.all(self.init_arr == [0, 0, 0], axis=2)
-
-        # Extract dynamic obstacles from init_arr
-        dynamic_green_mask = np.all(self.init_arr == [0, 255, 101], axis=2)
-        dynamic_purple_mask = np.all(self.init_arr == [203, 0, 255], axis=2)
-        summed_mask = dynamic_green_mask | dynamic_purple_mask
-
-        # Create debug directory if needed
+        # Create debug directory
         debug_dir = "debug_maps"
         os.makedirs(debug_dir, exist_ok=True)
 
-        for t in range(frames):
-            # Start with free cells everywhere
-            converted_seq[t] = 0
+        # Visualize the first 3 timesteps (0, 1, 2)
+        for t in range(min(10, converted_grid_seq.shape[0])):
+            # Create a temporary grid for this timestep
+            temp_grid = np.zeros_like(converted_grid_seq[t])
+            # Copy the data for this timestep
+            temp_grid[:] = converted_grid_seq[t]
 
-            # Mark static obstacles
-            converted_seq[t][static_mask] = 1
+            # Use the GridToRGB function to convert to RGB
+            rgb_map = GridToRGB(temp_grid)
 
-            # Mark dynamic obstacles from the current frame
-            # In GridBasedPathPlanning, dynamic obstacles have values > 1
-            converted_seq[t][summed_mask] = 2
+            # Save image
+            img_path = f"{debug_dir}/gridmapenv_slices_{marker}_{t}.png"
+            Image.fromarray(rgb_map).save(img_path)
+            print(f"Saved timestep {t} visualization to: {img_path}")
 
-            # Save a visualization of the first frame for debugging
-            if t == 0:
-                # Create RGB visualization of the converted sequence
-                conv_vis = np.zeros((height, width, 3), dtype=np.uint8)
-                conv_vis[converted_seq[t] == 0] = [255, 255, 255]  # Free cells -> White
-                conv_vis[converted_seq[t] == 1] = [0, 0, 0]        # Static obstacles -> Black
-                conv_vis[converted_seq[t] == 2] = [0, 255, 101]    # Dynamic obstacles -> Green
-                Image.fromarray(conv_vis).save(f"{debug_dir}/converted_frame0.png")
+        print("################################################################")
+        print("Dynamic map visualization complete. Images saved to debug_maps/")
+        print("################################################################")
 
-        # Print basic debug information
-        print(f"[DEBUG] Converted dynamic map: frames={frames}, shape={height}x{width}")
-        print(f"[DEBUG] Static obstacles: {np.sum(static_mask)}, Dynamic obstacles in first frame: {np.sum(summed_mask)}")
-
-        return converted_seq
+    # The convert_grid_seq_for_mylns2 function has been removed
+    # We now pass grid_seq directly to mylns2
 
 # ______________________________________________________________________________________________________________________
 
@@ -286,7 +256,7 @@ class CL_MAPFEnv(gym.Env):
                 if i < 0 or i >= sx or j < 0 or j >= sy:
                     continue
                 if world0[i, j] == -1:
-                    continue  # cell is an obstacle
+                    continue  # cell is a static obstacle
                 # If cell is marked as occupied, store region info.
                 if world0[i, j] > 0:
                     regions_dict[(i, j)] = visited
@@ -313,6 +283,13 @@ class CL_MAPFEnv(gym.Env):
 
         # Create a random static grid: cells are 0 (free) or -1 (obstacle)
         self.map = -(np.random.rand(int(self.size), int(self.size)) < prob).astype(int)
+
+        # Create the Grid environment first
+        self.grid = GridMapEnv(grid_size=(self.height, self.width))
+
+        # Initialize the grid with static map and create dynamic obstacles
+        self.set_grid(self.map, self.env_id, self.amr_count, self.FRAMES)
+
         # Copy the map to fix state (used for later visualization or reference)
         self.fix_state = copy.copy(self.map)
         # Create a dictionary for tracking dynamic state per cell.
@@ -321,16 +298,21 @@ class CL_MAPFEnv(gym.Env):
             for j in range(int(self.size)):
                 self.fix_state_dict[i, j] = []
 
-        # Randomize agent start positions
+        # Randomize agent start positions - now checking both static map and dynamic obstacles at time 0
         agent_counter = 0
         self.start_list = []
         while agent_counter < self.global_num_agent:
             x, y = np.random.randint(0, self.size), np.random.randint(0, self.size)
-            if self.fix_state[x, y] == 0:  # Only free cells are allowed
-                self.fix_state[x, y] += 1
-                self.fix_state_dict[x, y].append(agent_counter)
-                self.start_list.append((x, y))
-                agent_counter += 1
+            # Check if cell is free in static map and not occupied by dynamic obstacle at time 0
+            if self.fix_state[x, y] == 0:  # Free in static map
+                if self.grid_seq[0, x, y] < 0.1:  # No dynamic obstacle
+                    self.fix_state[x, y] += 1
+                    self.fix_state_dict[x, y].append(agent_counter)
+                    self.start_list.append((x, y))
+                    agent_counter += 1
+                else:
+                    # Skip this position due to dynamic obstacle
+                    print(f"[DEBUG] Skipping start position ({x},{y}) due to dynamic obstacle (value: {self.grid_seq[0, x, y]})")
         # Verify that total occupancy in fix_state equals total agents plus obstacles.
         assert(sum(sum(self.fix_state)) == self.global_num_agent + sum(sum(self.map)))
 
@@ -342,16 +324,29 @@ class CL_MAPFEnv(gym.Env):
         while goal_counter < self.global_num_agent:
             agent_pos = self.start_list[goal_counter]
             valid_tiles = get_connected_region(self.fix_state, agent_regions, agent_pos[0], agent_pos[1])
-            x, y = random.choice(list(valid_tiles))
+            # Filter valid tiles to exclude those with dynamic obstacles at time 0
+            valid_tiles_filtered = []
+            skipped_count = 0
+            for tile in valid_tiles:
+                x, y = tile
+                if self.grid_seq[0, x, y] < 0.1:  # No dynamic obstacle at time 0
+                    valid_tiles_filtered.append(tile)
+                else:
+                    skipped_count += 1
+
+            # If no valid tiles remain after filtering, use original set (better than getting stuck)
+            if not valid_tiles_filtered:
+                print(f"[WARNING] No valid tiles without dynamic obstacles for agent {goal_counter}. Using original set.")
+                valid_tiles_filtered = list(valid_tiles)
+            elif skipped_count > 0:
+                print(f"[DEBUG] Skipped {skipped_count} potential goal positions for agent {goal_counter} due to dynamic obstacles")
+
+            x, y = random.choice(valid_tiles_filtered)
             if goals[x, y] == 0 and self.fix_state[x, y] != -1:
                 goals[x, y] = goal_counter + 1
                 self.goal_list.append((x, y))
                 goal_counter += 1
 
-
-        self.grid = GridMapEnv(grid_size=(self.height, self.width)) # Create the Grid environment
-        # Initialize map
-        # self.set_grid(self.map, self.env_id, self.amr_count, self.FRAMES)
         # Initialize the world state with the fix_state and agent positions.
         self.world = State(self.fix_state, self.fix_state_dict, self.global_num_agent, self.start_list, self.goal_list)
 
@@ -792,47 +787,183 @@ class CL_MAPFEnv(gym.Env):
             done = True
         return obs, vector, rewards, done, next_valid_actions, num_on_goal, num_dynamic_collide, num_agent_collide, success, real_r
 
+    def visualize_paths(self, paths, timestep, output_path):
+        """
+        Visualize the map with agents and their paths at a specific timestep.
+        """
+        # Get the map at the current timestep
+        current_map = self.grid_seq[min(timestep, self.grid_seq.shape[0]-1)].copy()
+
+        # Convert to RGB
+        rgb_map = GridToRGB(current_map)
+
+        # Add agent positions at current timestep
+        for i, path in enumerate(paths):
+            if timestep < len(path):
+                pos = path[timestep]
+                # Mark current position in bright red
+                rgb_map[pos[0], pos[1]] = [255, 0, 0]  # Bright red for current position
+            else:
+                # If agent has reached goal, use last position
+                pos = path[-1]
+                # Mark final position in purple
+                rgb_map[pos[0], pos[1]] = [255, 0, 255]  # Purple for agents at goal
+
+        # Mark goal positions in blue
+        for pos in self.goal_list:
+            rgb_map[pos[0], pos[1]] = [0, 0, 255]  # Blue for goals
+
+        # Save the image
+        Image.fromarray(rgb_map.astype(np.uint8)).save(output_path)
+
+    def create_video_from_images(self, image_folder, pattern, output_path, fps=5, scale=1):
+        """
+        Create an animated GIF from a sequence of images.
+        """
+        try:
+            # Get list of all image filenames in the folder that match the pattern
+            images = [img for img in os.listdir(image_folder) if img.endswith(".png") and pattern in img]
+
+            # Sort images numerically by extracting the number from the filename
+            images.sort(key=lambda x: int(re.search(r'\d+', x).group()))
+
+            if not images:
+                print(f"No images found matching pattern: {pattern}")
+                return False
+
+            print(f"Found {len(images)} images for GIF creation")
+
+            # Ensure output path has .gif extension
+            if not output_path.endswith('.gif'):
+                output_path = output_path.replace('.mp4', '.gif')
+                output_path = output_path.replace('.avi', '.gif')
+                if not output_path.endswith('.gif'):
+                    output_path += '.gif'
+
+            # Load all images
+            frames = []
+            for image in images:
+                image_path = os.path.join(image_folder, image)
+                img = Image.open(image_path)
+
+                # Resize if needed
+                if scale != 1:
+                    new_size = (int(img.width * scale), int(img.height * scale))
+                    img = img.resize(new_size, Image.NEAREST)
+
+                frames.append(img)
+
+            if not frames:
+                print("No valid images found for GIF creation")
+                return False
+
+            # Calculate duration in milliseconds (1000 / fps)
+            duration = int(1000 / fps)
+
+            # Save as animated GIF
+            frames[0].save(
+                output_path,
+                save_all=True,
+                append_images=frames[1:],
+                optimize=False,
+                duration=duration,
+                loop=0  # Loop forever
+            )
+
+            print(f"Animated GIF created successfully: {output_path}")
+            return True
+
+        except Exception as e:
+            print(f"Error creating GIF: {e}")
+            return False
+
+    def visualize_solution(self, output_dir="sipps_visualizations", stage="final", is_final=False):
+        """
+        Visualize the solution found by the LNS2 algorithm.
+
+        Args:
+            output_dir: Base directory to save the visualization images
+            stage: Stage of the solution process ("initial", "iteration_X", or "final")
+            is_final: Whether this is the final solution (no collisions)
+        """
+        # Create a stage-specific directory
+        stage_dir = os.path.join(output_dir, stage)
+        os.makedirs(stage_dir, exist_ok=True)
+
+        # Get the paths from the LNS2 model
+        paths = self.lns2_model.vector_path
+
+        # Find the longest path (maximum number of timesteps needed)
+        max_path_length = max([len(path) for path in paths])
+        print(f"Visualizing {stage} solution with maximum path length: {max_path_length} timesteps")
+
+        # Count collisions - safely handle the case when neighbor isn't available
+        try:
+            # Try to access neighbor.colliding_pairs
+            if hasattr(self.lns2_model, 'neighbor') and hasattr(self.lns2_model.neighbor, 'colliding_pairs'):
+                num_collisions = len(self.lns2_model.neighbor.colliding_pairs)
+            else:
+                # If not available, use sipp_coll_pair_num if it exists
+                num_collisions = getattr(self, 'sipp_coll_pair_num', 0)
+        except Exception as e:
+            # If any error occurs, default to 0
+            print(f"Warning: Could not determine collision count: {e}")
+            num_collisions = 0
+
+        # Visualize every timestep until all agents reach their goals
+        for t in range(0, max_path_length):
+            self.visualize_paths(paths, t, os.path.join(stage_dir, f"t{t:03d}.png"))
+
+        # Create an animated GIF from the generated images
+        print(f"Creating animated GIF for {stage} solution...")
+        self.create_video_from_images(stage_dir, "t", os.path.join(stage_dir, "animation.gif"), fps=3)
+
+        # Create a larger-scale GIF for better visibility
+        print(f"Creating larger-scale animation for {stage} solution...")
+        self.create_video_from_images(stage_dir, "t", os.path.join(stage_dir, "animation_large.gif"), fps=3, scale=2)
+
+        # If this is the final solution (no collisions), also save it to the final directory
+        if is_final or stage == "final":
+            final_dir = os.path.join(output_dir, "final")
+            os.makedirs(final_dir, exist_ok=True)
+
+            # Copy the images to the final directory
+            for t in range(0, max_path_length):
+                self.visualize_paths(paths, t, os.path.join(final_dir, f"t{t:03d}.png"))
+
+            # Create animated GIFs in the final directory
+            self.create_video_from_images(final_dir, "t", os.path.join(final_dir, "animation.gif"), fps=3)
+            self.create_video_from_images(final_dir, "t", os.path.join(final_dir, "animation_large.gif"), fps=3, scale=2)
+
+            print(f"Final solution with {num_collisions} collisions saved to {final_dir}/")
+
+        print(f"Visualization for {stage} solution with {num_collisions} collisions complete. Saved to {stage_dir}/")
+
     def _global_reset(self, cl_num_task):
         # Reinitialize the MAPF task (this call resets start/goal positions, etc.)
         self.global_set_world(cl_num_task)
 
-        # Step the dynamic obstacles before processing agent actions:
-        self.set_grid(self.map, self.env_id, self.amr_count, self.FRAMES)
+        # Dynamic obstacles already created in global_set_world
+        # Just reset them to initial state
+        self.grid.ResetDynamicObstacles()
+        self.grid.ClearGrid(gridtype="grid_dynamic")
+        self.grid.RenderAllObstacles(typ="dynamic")
+        self.grid.RenderGrid()
         # Generate RGB representation
         rgb_grid = GridToRGB(self.grid.grid)
-        # Save raw static map as RGB for comparison
-        Image.fromarray((rgb_grid).astype(np.uint8)).save(f"debug_maps/static_map_env_{self.env_id}.png")
 
-        print("[DEBUG] Grid object count after static setup:", len(self.grid.objects))
-        print("[DEBUG] Static grid has nonzero elements:", np.count_nonzero(self.grid.grid_static))
+        # Debug visualization by debug_dynamic
+        # self.debug_dynamic(did='d1')
+        # self.debug_dynamic(did='d2')
+        # self.debug_gridmap(self.grid_seq, marker = "base")
 
-        print("🔍 DEBUG: Checking grid/map characteristics before MyLns2...")
+        # Initialize the LNS2 planner with the dynamic map sequence directly
+        # No conversion needed - passing grid_seq directly to mylns2
+        self.lns2_model = my_lns2.MyLns2(self.env_id * 123, self.grid_seq, self.start_list, self.goal_list, self.global_num_agent, self.map.shape[0])
 
-        # Static 2D map (was previously passed to LNS2)
-        print("→ self.map shape:", self.map.shape)
-        print("→ self.map dtype:", self.map.dtype)
-        print("→ self.map min/max:", np.min(self.map), np.max(self.map))
-        print("→ self.map sample slice:\n", self.map[:5, :5])
-
-        # Dynamic 3D grid sequence
-        print("→ self.grid_seq shape:", self.grid_seq.shape)
-        print("→ self.grid_seq dtype:", self.grid_seq.dtype)
-        print("→ self.grid_seq min/max:", np.min(self.grid_seq), np.max(self.grid_seq))
-
-        # First frame (what you're passing now)
-        print("→ First frame slice (t=0):\n", self.grid_seq[0][:5, :5])
-
-        self.debug_dynamic(did='d1')
-
-        # Convert the grid sequence for mylns2
-        converted_grid_seq = self.convert_grid_seq_for_mylns2(self.grid_seq)
-
-        self.debug_dynamic(did='d2')
-
-        # Debug visualization is now handled by debug_dynamic
-
-        # Initialize the LNS2 planner with the dynamic map sequence
-        self.lns2_model = my_lns2.MyLns2(self.env_id * 123, converted_grid_seq, self.start_list, self.goal_list, self.global_num_agent, self.map.shape[0])
+        # Set visualization delay to make the simulation more real-time
+        # Adjust this value to control the speed of the visualization (higher = slower)
+        self.lns2_model.setVisualizationDelay(200)  # 200ms delay between steps
         self.lns2_model.init_pp()
         self.paths = self.lns2_model.vector_path
         # Initialize dynamic state for the agents based on the planned paths.
@@ -840,6 +971,12 @@ class CL_MAPFEnv(gym.Env):
         self.idle_cost = EnvParameters.IDLE_COST[cl_num_task]
         self.action_cost = EnvParameters.ACTION_COST[cl_num_task]
         self.off_route_factor = EnvParameters.OFF_ROUTE_FACTOR[cl_num_task]
+
+        # Visualize the initial solution after global reset, but only if visualization is enabled
+        # This is not the final solution, so is_final=False
+        if self.enable_visualization:
+            self.visualize_solution(stage="initial", is_final=False)
+
         return
 
     def _local_reset(self, local_num_agents, first_time):
@@ -891,6 +1028,33 @@ class CL_MAPFEnv(gym.Env):
         self.new_collision_pairs = set()
         self.update_ulti()
         self.predict_next()
+
+        # Visualize the solution after local reset
+        # Use a counter to track iterations
+        if not hasattr(self, 'local_reset_counter'):
+            self.local_reset_counter = 1
+        else:
+            self.local_reset_counter += 1
+
+        # Determine if this is the final solution (no collisions)
+        # Safely handle the case when sipp_coll_pair_num might not be available
+        try:
+            is_final = (self.sipp_coll_pair_num == 0)
+        except AttributeError:
+            # If sipp_coll_pair_num is not available, assume it's not final
+            is_final = False
+
+        # Visualize the solution after this iteration, but only if visualization is enabled
+        # Only visualize if this is not the first time (to avoid duplicate with initial)
+        if self.enable_visualization and not first_time and self.local_reset_counter % 5 == 0:
+            self.visualize_solution(
+                stage=f"iteration_{self.local_reset_counter}",
+                is_final=is_final
+            )
+
+        # If this is the final iteration of the entire process (e.g., in driver.py),
+        # we'll save a separate final visualization at the end
+
         return
 
     def list_next_valid_actions(self, local_agent_index):

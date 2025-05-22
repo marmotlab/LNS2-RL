@@ -1,0 +1,145 @@
+{
+  "metadata": {
+    "manhattan_distances": [
+      310,
+      273,
+      260,
+      212,
+      246
+    ],
+    "avg_manhattan_distance": 260.2,
+    "num_agents": 5,
+    "timestamp": "2025-05-22 21:00:43"
+  },
+  "results": [
+    {
+      "algorithm": "Original LNS2",
+      "runtime": 3.5262839794158936,
+      "path_lengths": [
+        372,
+        273,
+        328,
+        232,
+        264
+      ],
+      "avg_path_length": 293.8,
+      "success_rate": 1.0,
+      "iterations": 0,
+      "final_collisions": 0,
+      "algorithm_type": "Original LNS2 mean",
+      "avg_path_length_ratio": 1.1258097631774577,
+      "path_length_ratios": [
+        1.2,
+        1.0,
+        1.2615384615384615,
+        1.0943396226415094,
+        1.0731707317073171
+      ]
+    },
+    {
+      "algorithm": "TJPS",
+      "runtime": 42.381272315979004,
+      "agent_runtimes": [
+        2.711229085922241,
+        0.24336576461791992,
+        37.448349714279175,
+        0.9195473194122314,
+        1.0586462020874023
+      ],
+      "path_lengths": [
+        529.0,
+        483.0,
+        489.0,
+        387.0,
+        454.0
+      ],
+      "avg_path_length": 468.4,
+      "success_rate": 1.0,
+      "iterations": 1,
+      "final_collisions": 0,
+      "algorithm_type": "TJPS mean",
+      "avg_path_length_ratio": 1.8054903532601974,
+      "path_length_ratios": [
+        1.706451612903226,
+        1.7692307692307692,
+        1.8807692307692307,
+        1.8254716981132075,
+        1.8455284552845528
+      ],
+      "min_agent_runtime": 0.24336576461791992,
+      "max_agent_runtime": 37.448349714279175
+    },
+    {
+      "algorithm": "Dynamic Drone (Before Kinematic)",
+      "runtime": 4.103296279907227,
+      "initial_path_lengths": [
+        372,
+        273,
+        328,
+        232,
+        272
+      ],
+      "avg_path_length": 295.4,
+      "success_rate": 1.0,
+      "iterations": 0,
+      "final_collisions": 0,
+      "algorithm_type": "kinematic_dynamic mean",
+      "avg_initial_path_length_ratio": 1.132313828218108,
+      "initial_path_length_ratios": [
+        1.2,
+        1.0,
+        1.2615384615384615,
+        1.0943396226415094,
+        1.1056910569105691
+      ]
+    },
+    {
+      "algorithm": "Dynamic Drone Solution",
+      "runtime": 14.483659744262695,
+      "step_runtimes": {
+        "step1": 4.103296279907227,
+        "step2": 0.0006213188171386719,
+        "step3": 0.09618258476257324,
+        "step4": 9.898350238800049,
+        "step5": 0.002431154251098633,
+        "step6": 0.3827781677246094
+      },
+      "initial_path_lengths": [
+        372,
+        273,
+        328,
+        232,
+        272
+      ],
+      "avg_initial_path_length": 295.4,
+      "trajectory_lengths": [
+        347.3991837040413,
+        264.1173713242614,
+        305.7239159513689,
+        226.0333766618408,
+        263.9944222396556
+      ],
+      "avg_trajectory_length": 281.4536539762336,
+      "success_rate": 1.0,
+      "algorithm_type": "kinematic_dynamic mean",
+      "avg_initial_path_length_ratio": 1.132313828218108,
+      "initial_path_length_ratios": [
+        1.2,
+        1.0,
+        1.2615384615384615,
+        1.0943396226415094,
+        1.1056910569105691
+      ],
+      "avg_trajectory_length_ratio": 1.0806619745433568,
+      "trajectory_length_ratios": [
+        1.1206425280775527,
+        0.9674628986236681,
+        1.1758612151975727,
+        1.0661951729332113,
+        1.0731480578847787
+      ],
+      "planning_time": 4.103296279907227,
+      "conversion_time": 10.380363464355469
+    }
+  ]
+}

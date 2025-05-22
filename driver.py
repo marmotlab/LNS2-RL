@@ -198,10 +198,6 @@ def main():
                                   "episode": curr_episodes,
                                   "im_step": im_steps}
                 torch.save(net_checkpoint, path_checkpoint)
-                
-            # Call the save function for each environment (if using Ray, do it remotely):
-            futures = [env.save_iteration_as_image.remote(curr_steps) for env in envs]
-            ray.get(futures)
             
             
     except KeyboardInterrupt:

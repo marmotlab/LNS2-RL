@@ -11,7 +11,7 @@
 
 // Init MyLns2 with dynamic map sequence
 MyLns2::MyLns2(int seed,
-               std::vector<std::vector<std::vector<int>>> dynamic_map_seq,
+               std::vector<std::vector<std::vector<float>>> dynamic_map_seq,
                std::vector<std::pair<int, int>> start_poss,
                std::vector<std::pair<int, int>> goal_poss,
                int all_ag_num,
@@ -40,30 +40,12 @@ MyLns2::MyLns2(int seed,
             // For Rerun visualization: 1 is obstacle, 0 is free space
             std::vector<std::vector<int>> static_map(dynamic_map_seq[0].size(), std::vector<int>(dynamic_map_seq[0][0].size(), 0));
 
-            // First check if we have any value of 1 in the dynamic map (GridBasedPathPlanning representation)
-            bool has_obstacles_as_1 = false;
-            for (size_t i = 0; i < dynamic_map_seq[0].size() && !has_obstacles_as_1; i++) {
-                for (size_t j = 0; j < dynamic_map_seq[0][0].size() && !has_obstacles_as_1; j++) {
-                    if (dynamic_map_seq[0][i][j] == 1) {
-                        has_obstacles_as_1 = true;
-                        break;
-                    }
-                }
-            }
-
-            // Now extract the static map based on the representation
+            // Extract static map based on GridMapEnv representation
+            // In GridMapEnv, static obstacles have values > 0.9
             for (size_t i = 0; i < dynamic_map_seq[0].size(); i++) {
                 for (size_t j = 0; j < dynamic_map_seq[0][0].size(); j++) {
-                    if (has_obstacles_as_1) {
-                        // GridBasedPathPlanning representation (1 is obstacle)
-                        if (dynamic_map_seq[0][i][j] == 1) {
-                            static_map[i][j] = 1; // Set as obstacle for Rerun
-                        }
-                    } else {
-                        // MAPF representation (-1 is obstacle)
-                        if (dynamic_map_seq[0][i][j] == -1) {
-                            static_map[i][j] = 1; // Set as obstacle for Rerun
-                        }
+                    if (dynamic_map_seq[0][i][j] > 0.9) {
+                        static_map[i][j] = 1; // Set as obstacle for Rerun
                     }
                 }
             }
@@ -75,8 +57,8 @@ MyLns2::MyLns2(int seed,
                     if (cell == 1) obstacle_count++;
                 }
             }
-            std::cout << "[DEBUG] Static map size: " << static_map.size() << "x" << static_map[0].size() << std::endl;
-            std::cout << "[DEBUG] Static map obstacle count: " << obstacle_count << std::endl;
+            // std::cout << "[DEBUG] Static map size: " << static_map.size() << "x" << static_map[0].size() << std::endl;
+            // std::cout << "[DEBUG] Static map obstacle count: " << obstacle_count << std::endl;
             publishMapRerun(static_map, instance.start_locations);
             map_logged = true;
         }
@@ -147,7 +129,7 @@ MyLns2::MyLns2(int seed,
                         if (cell == -1) orig_obstacle_count++;
                     }
                 }
-                std::cout << "[DEBUG] Original map has " << orig_obstacle_count << " obstacles (-1 values)" << std::endl;
+                // std::cout << "[DEBUG] Original map has " << orig_obstacle_count << " obstacles (-1 values)" << std::endl;
 
                 // Convert and count converted obstacles
                 int converted_obstacle_count = 0;
@@ -159,8 +141,8 @@ MyLns2::MyLns2(int seed,
                         }
                     }
                 }
-                std::cout << "[DEBUG] Converting MAPF format map to Rerun format" << std::endl;
-                std::cout << "[DEBUG] Converted map has " << converted_obstacle_count << " obstacles (1 values)" << std::endl;
+                // std::cout << "[DEBUG] Converting MAPF format map to Rerun format" << std::endl;
+                // std::cout << "[DEBUG] Converted map has " << converted_obstacle_count << " obstacles (1 values)" << std::endl;
 
                 // Force a small delay to ensure visualization is initialized
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -168,7 +150,7 @@ MyLns2::MyLns2(int seed,
                 publishMapRerun(rerun_map, instance.start_locations);
             } else {
                 // Use the map as is
-                std::cout << "[DEBUG] Map is already in Rerun format (using 1 for obstacles)" << std::endl;
+                // std::cout << "[DEBUG] Map is already in Rerun format (using 1 for obstacles)" << std::endl;
                 publishMapRerun(obs_map, instance.start_locations);
             }
             map_logged = true;
@@ -220,8 +202,8 @@ void MyLns2::publishMapRerun(const std::vector<std::vector<int>> &map,
             if (cell == 1) obstacle_count++;
         }
     }
-    std::cout << "[DEBUG] publishMapRerun - Map size: " << height << "x" << width << std::endl;
-    std::cout << "[DEBUG] publishMapRerun - Obstacle count: " << obstacle_count << std::endl;
+    // std::cout << "[DEBUG] publishMapRerun - Map size: " << height << "x" << width << std::endl;
+    // std::cout << "[DEBUG] publishMapRerun - Obstacle count: " << obstacle_count << std::endl;
 
     // Create a simple grid representation with points
     std::vector<rerun::components::Position3D> grid_positions;
@@ -243,7 +225,7 @@ void MyLns2::publishMapRerun(const std::vector<std::vector<int>> &map,
         }
     }
 
-    std::cout << "[DEBUG] Created grid with " << grid_positions.size() << " cells" << std::endl;
+    // std::cout << "[DEBUG] Created grid with " << grid_positions.size() << " cells" << std::endl;
 
     // Log the entire grid with timeline set to 0
     rec->set_time_sequence("planning_time", 0);
@@ -267,7 +249,7 @@ void MyLns2::publishMapRerun(const std::vector<std::vector<int>> &map,
         }
     }
 
-    std::cout << "[DEBUG] Created free space layer with " << free_positions.size() << " cells" << std::endl;
+    // std::cout << "[DEBUG] Created free space layer with " << free_positions.size() << " cells" << std::endl;
 
     // Log the free space layer with timeline set to 0
     if (!free_positions.empty()) {
@@ -316,17 +298,7 @@ void MyLns2::publishMapRerun(const std::vector<std::vector<int>> &map,
             .with_colors(std::vector<rerun::components::Color>(vertical_lines.size(), rerun::components::Color(100, 100, 100, 150))) // Medium gray with transparency
             .with_radii(std::vector<float>(vertical_lines.size(), 0.02f)));
 
-    std::cout << "[DEBUG] Created grid lines: " << horizontal_lines.size() << " horizontal, " << vertical_lines.size() << " vertical" << std::endl;
-
-    // Print the first few rows of the map for debugging
-    std::cout << "[DEBUG] Map content (first 5x5 section):" << std::endl;
-    for (int y = 0; y < std::min(5, height); y++) {
-        std::cout << "  ";
-        for (int x = 0; x < std::min(5, width); x++) {
-            std::cout << map[y][x] << " ";
-        }
-        std::cout << std::endl;
-    }
+    // std::cout << "[DEBUG] Created grid lines: " << horizontal_lines.size() << " horizontal, " << vertical_lines.size() << " vertical" << std::endl;
 
     // Create points for obstacles with a raised z-coordinate for better visibility
     std::vector<rerun::components::Position3D> obstacle_positions;
@@ -343,7 +315,7 @@ void MyLns2::publishMapRerun(const std::vector<std::vector<int>> &map,
         }
     }
 
-    std::cout << "[DEBUG] Found " << obstacle_positions.size() << " obstacles to visualize" << std::endl;
+    // std::cout << "[DEBUG] Found " << obstacle_positions.size() << " obstacles to visualize" << std::endl;
 
     if (!obstacle_positions.empty()) {
         // Force a small delay to ensure visualization is initialized
@@ -370,7 +342,7 @@ void MyLns2::publishMapRerun(const std::vector<std::vector<int>> &map,
                     .with_colors(batch_colors)
                     .with_radii(batch_radii));
 
-            std::cout << "[DEBUG] Logged obstacle batch " << i/batch_size << " with " << count << " obstacles" << std::endl;
+            // std::cout << "[DEBUG] Logged obstacle batch " << i/batch_size << " with " << count << " obstacles" << std::endl;
 
             // Small delay between batches
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
@@ -381,7 +353,7 @@ void MyLns2::publishMapRerun(const std::vector<std::vector<int>> &map,
         std::cout << "[WARNING] No obstacles to visualize!" << std::endl;
 
         // If no obstacles found, create test obstacles to verify visualization works
-        std::cout << "[DEBUG] Creating test obstacles to verify visualization" << std::endl;
+        // std::cout << "[DEBUG] Creating test obstacles to verify visualization" << std::endl;
 
         // Create a 3x3 grid of test obstacles
         for (int y = 0; y < 3; y++) {
@@ -529,22 +501,43 @@ void MyLns2::init_pp()
     for (auto id : neighbor.agents)
     {
 #if RERUN_ENABLED
-        if (use_rerun) {
-            // Collect other agents' start positions
-            std::vector<int> other_starts;
-            std::vector<int> other_goals;
-            std::vector<Path> other_paths;
+        // Collect other agents' information for path planning and visualization
+        // This should always run, regardless of visualization settings
+        std::vector<int> other_starts;
+        std::vector<int> other_goals;
+        std::vector<Path> other_paths;
 
-            for (int other_id = 0; other_id < (int)agents.size(); other_id++) {
-                if (other_id != id && !agents[other_id].path.empty()) {
-                    other_starts.push_back(agents[other_id].path_planner->start_location);
-                    other_goals.push_back(agents[other_id].path_planner->goal_location);
-                    other_paths.push_back(agents[other_id].path);
-                }
+        for (int other_id = 0; other_id < (int)agents.size(); other_id++) {
+            if (other_id != id && !agents[other_id].path.empty()) {
+                other_starts.push_back(agents[other_id].path_planner->start_location);
+                other_goals.push_back(agents[other_id].path_planner->goal_location);
+                other_paths.push_back(agents[other_id].path);
             }
+        }
 
-            // Set the information for visualization
-            agents[id].path_planner->setOtherAgentsInfo(other_starts, other_goals, other_paths);
+        // Set the information for path planning and visualization
+        // The path planner will handle visualization conditionally
+        agents[id].path_planner->setOtherAgentsInfo(other_starts, other_goals, other_paths);
+
+        // Highlight the current agent's goal in yellow
+
+        if (use_rerun && rec) {
+            int goal_x = instance.getColCoordinate(agents[id].path_planner->goal_location);
+            int goal_y = instance.getRowCoordinate(agents[id].path_planner->goal_location);
+
+            // Create a yellow marker for the current agent's goal
+            std::vector<rerun::components::Position3D> current_goal_pos;
+            current_goal_pos.push_back(rerun::components::Position3D(goal_x + 0.5f, goal_y + 0.5f, 0.1f));
+            std::vector<rerun::components::Color> current_goal_colors;
+            current_goal_colors.push_back(rerun::components::Color(255, 255, 0)); // Yellow
+            std::vector<float> current_goal_radii;
+            current_goal_radii.push_back(0.45f);
+
+            rec->log(log_prefix + "/current_agent_goal",
+                    rerun::Points3D()
+                        .with_positions(current_goal_pos)
+                        .with_colors(current_goal_colors)
+                        .with_radii(current_goal_radii));
         }
 #endif
 
@@ -563,6 +556,13 @@ void MyLns2::init_pp()
         std::cout << "  Goal location: " << agents[id].path_planner->goal_location << std::endl;
     }  // no hard obstacle, thus must find path
         path_table.insertPath(agents[id].id, agents[id].path);
+
+        // Clear the current agent's goal highlight after planning is complete
+#if RERUN_ENABLED
+        if (use_rerun && rec) {
+            rec->log(log_prefix + "/current_agent_goal", rerun::Clear());
+        }
+#endif
     }
     vector_path.reserve(instance.num_of_agents);
     for (const auto &agent : agents)
@@ -619,7 +619,7 @@ bool MyLns2::updateCollidingPairs(set<pair<int, int>>& colliding_pairs, int agen
                     if (a1 == a2)
                     {
                         succ = true;
-                        colliding_pairs.emplace(min(agent_id, a1), max(agent_id, a1));
+                        colliding_pairs.emplace(min(agent_id, a2), max(agent_id, a2));
                         break;
                     }
                 }
@@ -669,10 +669,81 @@ bool MyLns2::updateCollidingPairs(set<pair<int, int>>& colliding_pairs, int agen
 % Outputs:
 %   - Visszatér a jelenlegi colliding_pairs számával, jelezve, hány konfliktus maradt.
 */
+
+// Helper function to count waiting actions in a path
+int countWaitingActions(const Path& path) {
+    if (path.size() <= 1) return 0;
+
+    int wait_count = 0;
+    int consecutive_waits = 0;
+    int max_consecutive_waits = 0;
+
+    for (size_t i = 1; i < path.size(); i++) {
+        if (path[i].location == path[i-1].location) {
+            wait_count++;
+            consecutive_waits++;
+
+            // Track the maximum consecutive waits
+            max_consecutive_waits = std::max(max_consecutive_waits, consecutive_waits);
+        } else {
+            consecutive_waits = 0;
+        }
+    }
+
+    // Weight consecutive waits more heavily
+    // This prioritizes agents with long waiting sequences
+    return wait_count + max_consecutive_waits * 3;
+}
+
 int MyLns2::calculate_sipps(vector<int> new_agents)
 {
     neighbor.colliding_pairs.clear();
-    neighbor.agents=new_agents;
+
+    // Sort agents by waiting actions (if they have paths)
+    // This prioritizes agents with more waiting actions for replanning
+    std::vector<std::pair<int, int>> agent_wait_counts;
+    for (int agent_id : new_agents) {
+        int wait_count = 0;
+        if (agent_id < agents.size() && !agents[agent_id].path.empty()) {
+            wait_count = countWaitingActions(agents[agent_id].path);
+        }
+        agent_wait_counts.push_back(std::make_pair(agent_id, wait_count));
+    }
+
+    // Sort by wait count in descending order
+    std::sort(agent_wait_counts.begin(), agent_wait_counts.end(),
+              [](const std::pair<int, int>& a, const std::pair<int, int>& b) {
+                  return a.second > b.second;
+              });
+
+    // Extract just the agent IDs in the new order
+    neighbor.agents.clear();
+    for (const auto& pair : agent_wait_counts) {
+        neighbor.agents.push_back(pair.first);
+        // Debug output to show prioritization
+        if (pair.second > 0) {
+            // Count actual waits and consecutive waits for detailed output
+            int actual_waits = 0;
+            int consecutive_waits = 0;
+            int max_consecutive_waits = 0;
+
+            for (size_t i = 1; i < agents[pair.first].path.size(); i++) {
+                if (agents[pair.first].path[i].location == agents[pair.first].path[i-1].location) {
+                    actual_waits++;
+                    consecutive_waits++;
+                    max_consecutive_waits = std::max(max_consecutive_waits, consecutive_waits);
+                } else {
+                    consecutive_waits = 0;
+                }
+            }
+
+            std::cout << "Agent " << pair.first << " has " << actual_waits
+                      << " waiting actions (max " << max_consecutive_waits
+                      << " consecutive) - priority score: " << pair.second
+                      << " - prioritizing for replanning" << std::endl;
+        }
+    }
+
     for (int i = 0; i < (int)neighbor.agents.size(); i++)
         path_table.deletePath(neighbor.agents[i]);
     makespan=path_table.makespan;
@@ -684,24 +755,44 @@ int MyLns2::calculate_sipps(vector<int> new_agents)
     {
         int id = *p;
 
-        // Set other agents' information for visualization
 #if RERUN_ENABLED
-        if (use_rerun) {
-            // Collect other agents' start positions
-            std::vector<int> other_starts;
-            std::vector<int> other_goals;
-            std::vector<Path> other_paths;
+        // Collect other agents' information for path planning and visualization
+        // This should always run, regardless of visualization settings
+        std::vector<int> other_starts;
+        std::vector<int> other_goals;
+        std::vector<Path> other_paths;
 
-            for (int other_id = 0; other_id < (int)agents.size(); other_id++) {
-                if (other_id != id && !agents[other_id].path.empty()) {
-                    other_starts.push_back(agents[other_id].path_planner->start_location);
-                    other_goals.push_back(agents[other_id].path_planner->goal_location);
-                    other_paths.push_back(agents[other_id].path);
-                }
+        for (int other_id = 0; other_id < (int)agents.size(); other_id++) {
+            if (other_id != id && !agents[other_id].path.empty()) {
+                other_starts.push_back(agents[other_id].path_planner->start_location);
+                other_goals.push_back(agents[other_id].path_planner->goal_location);
+                other_paths.push_back(agents[other_id].path);
             }
+        }
 
-            // Set the information for visualization
-            agents[id].path_planner->setOtherAgentsInfo(other_starts, other_goals, other_paths);
+        // Set the information for path planning and visualization
+        // The path planner will handle visualization conditionally
+        agents[id].path_planner->setOtherAgentsInfo(other_starts, other_goals, other_paths);
+
+        // Highlight the current agent's goal in yellow
+
+        if (use_rerun && rec) {
+            int goal_x = instance.getColCoordinate(agents[id].path_planner->goal_location);
+            int goal_y = instance.getRowCoordinate(agents[id].path_planner->goal_location);
+
+            // Create a yellow marker for the current agent's goal
+            std::vector<rerun::components::Position3D> current_goal_pos;
+            current_goal_pos.push_back(rerun::components::Position3D(goal_x + 0.5f, goal_y + 0.5f, 0.1f));
+            std::vector<rerun::components::Color> current_goal_colors;
+            current_goal_colors.push_back(rerun::components::Color(255, 255, 0)); // Yellow
+            std::vector<float> current_goal_radii;
+            current_goal_radii.push_back(0.45f);
+
+            rec->log(log_prefix + "/current_agent_goal",
+                    rerun::Points3D()
+                        .with_positions(current_goal_pos)
+                        .with_colors(current_goal_colors)
+                        .with_radii(current_goal_radii));
         }
 #endif
 
@@ -737,6 +828,14 @@ int MyLns2::calculate_sipps(vector<int> new_agents)
         }
         sipps_path.push_back(single_path);
         path_table.insertPath(agents[id].id, agents[id].path);
+
+        // Clear the current agent's goal highlight after planning is complete
+#if RERUN_ENABLED
+        if (use_rerun && rec) {
+            rec->log(log_prefix + "/current_agent_goal", rerun::Clear());
+        }
+#endif
+
         ++p;
     }
     for (auto id : neighbor.agents)

@@ -71,3 +71,6 @@ noise
 matplotlib
 catkin_pkg
 rospkg
+scipy
+cbs
+opencv-python

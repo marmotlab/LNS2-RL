@@ -37,6 +37,18 @@ public:
 	{
 		bool operator()(const LLNode* n1, const LLNode* n2) const // returns true if n1 > n2
 		{
+			// Check for waiting at the same location
+			if (n1->parent != nullptr && n2->parent != nullptr) {
+				bool n1_waiting = (n1->location == n1->parent->location);
+				bool n2_waiting = (n2->location == n2->parent->location);
+
+				// If one is waiting and the other isn't, prefer the non-waiting node
+				if (n1_waiting != n2_waiting) {
+					return n1_waiting;  // n1 > n2 if n1 is waiting and n2 is not
+				}
+			}
+
+			// If conflicts are the same, check other criteria
 			if (n1->num_of_conflicts == n2->num_of_conflicts)
 			{
                 if (n1->g_val + n1->h_val == n2->g_val + n2->h_val)
@@ -110,16 +122,20 @@ public:
 	}
 	virtual ~SingleAgentSolver()= default;
 
+    // Set the use_rerun flag - always defined, but only has effect when RERUN_ENABLED
+    virtual void setUseRerun(bool use) {
 #if RERUN_ENABLED
-    // Set the use_rerun flag
-    virtual void setUseRerun(bool use) { use_rerun = use; }
+        use_rerun = use;
+#endif
+    }
 
-    // Virtual methods for visualization
+    // Virtual methods for visualization and dynamic obstacle tracking
+    // These are always defined, but their implementation may be conditional
     virtual void setOtherAgentsInfo(const std::vector<int>& starts, const std::vector<int>& goals,
                                   const std::vector<Path>& paths) {}
     virtual void addSoftCollisionPoint(int location) {}
     virtual void clearSoftCollisionPoints() {}
-#endif
+    virtual void setVisualizationDelay(int delay_ms) {}
     void reset()
     {
         if (num_generated > 0)

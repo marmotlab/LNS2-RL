@@ -1,0 +1,17 @@
+MAPF Performance Analysis Log
+===========================
+
+Environment creation: 0.81 seconds
+LNS2 initialization: 7.55 seconds
+Initial planning: 0.04 seconds
+Iterative conflict resolution: 0.00 seconds
+Total planning time: 7.59 seconds
+
+Percentage breakdown:
+Environment creation: 10.7%
+LNS2 initialization: 99.5%
+Initial planning: 0.5%
+Iterative conflict resolution: 0.0%
+
+Most computationally expensive part: LNS2 initialization
+This is likely due to the initialization of the path planning algorithm.

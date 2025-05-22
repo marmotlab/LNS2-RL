@@ -5,9 +5,14 @@
 \usepackage{enumitem}
 \usepackage{hyperref}
 \usepackage{geometry}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{xcolor}
+\usepackage{tikz}
+\usetikzlibrary{shapes,arrows,positioning}
 \geometry{margin=1in}
 
-\title{A MAPF-LNS2 Algoritmus Implementációja}
+\title{A MAPF-LNS2 Algoritmus Részletes Dokumentációja}
 \author{Czimber Márk}
 \date{\today}
 
@@ -15,28 +20,256 @@
 
 \maketitle
 
-\section{LNS2 Elemzés}
+\tableofcontents
+\newpage
 
-\subsection{SIPP.cpp}
-\textbf{Cél:} Egy ügynök útvonaltervezését valósítja meg a SIPP algoritmussal, ahol minden csomópontot a következő komponensekkel definiál:
+\section{Bevezetés}
+
+Ez a dokumentáció a Multi-Agent Path Finding (MAPF) problémára alkalmazott Large Neighborhood Search (LNS2) algoritmus részletes leírását tartalmazza. A dokumentáció célja, hogy világos és pontos képet adjon az algoritmus működéséről, matematikai alapjairól, és implementációs részleteiről.
+
+\subsection{A MAPF Probléma Definíciója}
+
+A Multi-Agent Path Finding (MAPF) probléma formálisan a következőképpen definiálható:
+
+\begin{itemize}
+    \item Adott egy $G = (V, E)$ gráf, ahol $V$ a csomópontok halmaza és $E$ az élek halmaza.
+    \item Adott $n$ számú ügynök, mindegyikhez tartozik egy $s_i \in V$ kezdőpozíció és egy $g_i \in V$ célpozíció, ahol $i \in \{1, 2, ..., n\}$.
+    \item Az ügynökök egyszerre mozognak diszkrét időlépésekben. Minden időlépésben egy ügynök vagy egy szomszédos csomópontra lép, vagy helyben marad.
+    \item A cél olyan útvonalak megtalálása minden ügynök számára, amelyek minimalizálják a teljes költséget (pl. összes időlépés), miközben elkerülik az ütközéseket.
+\end{itemize}
+
+Az ütközések három típusa:
+\begin{itemize}
+    \item \textbf{Vertex ütközések:} Amikor két ügynök ugyanazon a cellán tartózkodik ugyanabban az időlépésben.
+    \item \textbf{Edge ütközések:} Amikor két ügynök ellentétes irányban halad át ugyanazon az élen.
+    \item \textbf{Cél ütközések:} Amikor egy ügynök áthalad egy másik ügynök célpozícióján, vagy egy másik ügynök áthalad az ő célpozícióján.
+\end{itemize}
+
+\subsection{A Kiterjesztett MAPF Probléma Dinamikus Akadályokkal}
+
+A standard MAPF problémát kiterjesztettük dinamikus akadályokkal (radar zónák). \textbf{Ugye az lns2 algoritmus és a tanítás szempontjából a dinamikus akadály és a radar zóna ugyanez, hiszen ezek valamilyen kiterjedésű időben változó pozícióval rendelkeznek.} Ezeket a radar zónák puha korlátként vesszük fel, azaz:
+
+\begin{itemize}
+    \item Az ügynökök áthaladhatnak a radar zónákon, de megnövekedett költséggel (1 helyett 3).
+    \item Az algoritmus a \texttt{getMoveCost()} függvényen keresztül figyelembe veszi a radar zónákat, amely magasabb költséget rendel a dinamikus akadályokhoz.
+    \item A dinamikus akadályokat nem kezeljük soft korlátként, hiszen a soft ütközések bekerülnek a constraint táblázatba, amikre aztán utó-optimalizálás megy végbe. Amennyiben áthaladunk radarzónákon nem akarjuk újraszámolni az utat csak azért, mert áthaladunk, mivel ez megengedett. Ellenkező esetben, ha ütközésként kezelnénk őket, túl sokszor számolnánk újra az útvonalakat és elszállna az algoritmus. Tehát csak a költséget növelik, amire ugye szintén optimalizálunk, csak a A* fundamentális működése végett, ami az útvonal-költséget minimalizálja. Viszont radar zónán való áthaladás nem számít ütközésnek és nem is számolunk újra útvonalakat iteratívan a lns2-ben, ha radar zónákon haladunk át, csak olyan útvonalakat számolunk újra, ahol 2 ügynök ütközik egymással.
+\end{itemize}
+
+Ez a kiterjesztés realisztikusabb modellt biztosít olyan alkalmazásokhoz, mint a drónok útvonaltervezése radar zónák között, ahol bizonyos területek elkerülendők, de nem feltétlenül tiltottak.
+
+\section{Az LNS2 Algoritmus}
+
+\subsection{Az Algoritmus Áttekintése és Matematikai Alapjai}
+
+Az LNS2 (Large Neighborhood Search) egy metaheurisztikus algoritmus, amely iteratív módon javítja a MAPF problémára adott megoldást. Az algoritmus a következő modellen alapul:
+
+Legyen $\Pi = \{\pi_1, \pi_2, ..., \pi_n\}$ az ügynökök útvonalainak halmaza, ahol $\pi_i = \langle v_i^0, v_i^1, ..., v_i^{T_i} \rangle$ az $i$-edik ügynök útvonala, amely $v_i^t \in V$ csomópontokból áll, ahol $t \in \{0, 1, ..., T_i\}$ az időlépés, és $T_i$ az $i$-edik ügynök útvonalának hossza.
+
+Az algoritmus célja olyan $\Pi$ útvonalhalmaz megtalálása, amely minimalizálja a következő célfüggvényt:
+\[
+C(\Pi) = \sum_{i=1}^{n} c(\pi_i) + \lambda \cdot |\text{Conflicts}(\Pi)|
+\]
+
+ahol:
+\begin{itemize}
+    \item $c(\pi_i)$ az $i$-edik ügynök útvonalának költsége (pl. hossza vagy időtartama)
+    \item $\text{Conflicts}(\Pi)$ az útvonalak közötti ütközések halmaza
+    \item $\lambda$ egy nagy pozitív szám, amely az ütközések elkerülésének fontosságát súlyozza
+\end{itemize}
+
+Az LNS2 algoritmus fő lépései részletesen:
+
+\begin{enumerate}
+    \item \textbf{Kezdeti megoldás generálása:}
+    \begin{itemize}
+        \item Minden $i \in \{1, 2, ..., n\}$ ügynök számára egyéni útvonalat tervezünk a SIPP algoritmussal:
+        \[
+        \pi_i = \text{SIPP}(G, s_i, g_i, \emptyset)
+        \]
+        ahol $G$ a gráf, $s_i$ a kezdőpozíció, $g_i$ a célpozíció, és $\emptyset$ az üres korlátozáshalmaz.
+        \item Ebben a fázisban az ügynökök útvonalait egymástól függetlenül tervezzük, így ütközések előfordulhatnak.
+    \end{itemize}
+
+    \item \textbf{Iteratív javítás:}
+    \begin{enumerate}
+        \item \textbf{Ütköző ügynökpárok azonosítása:}
+        \[
+        \text{Conflicts}(\Pi) = \{(i, j, t, v) \mid v_i^t = v_j^t \text{ vagy } (v_i^t, v_i^{t+1}) = (v_j^{t+1}, v_j^t)\}
+        \]
+        ahol $(i, j, t, v)$ egy ütközés az $i$ és $j$ ügynökök között a $t$ időpontban a $v$ csomóponton vagy egy élen.
+
+        \item \textbf{Újratervezendő ügynökök kiválasztása:}
+        Az algoritmus a \texttt{calculate\_sipps()} függvényen keresztül kapja meg az újratervezendő ügynökök azonosítóit. Az újratervezendő ügynökök kiválasztása nem az algoritmus része, hanem a hívó kód feladata, amit jelenleg a python rész végez és véletlenszerűen választjuk ki a ügynökök egy részhalmazát, ha az útvonalaik ütközéseket tartalmaznak. A jelenlegi implementációban:
+        \begin{itemize}
+            \item \textbf{Útvonalak újratervezése:} Az újratervezés a SIPP algoritmus segítségével történik, amely a kiválasztott ügynökök teljes útvonalát újratervezi, tehát törli a régi útvonalat és új SIPP-et hív. Ez valószínűleg az egyszerűség és a globális optimum érdekében történik így.
+
+            \item \textbf{Constraint táblázat:} Először az összes nem újratervezendő ágens útvonalait felveszi egy constraint táblázatba, amely tárolja, hogy mely cellák mely időpontokban foglaltak.
+
+            \item \textbf{Safe interval-ok:} A SIPP az időt "biztonságos intervallumokra" bontja minden cellához. Egy safe interval olyan $[t_{start}, t_{end})$ időszak, amikor egy cella biztosan nem ütközik más ágensek útvonalaival. Matematikailag, ha egy $v$ csomópont foglalt a $t_1, t_2, \ldots, t_k$ időpontokban, akkor a biztonságos intervallumok:
+            \[
+            [0, t_1), [t_1+1, t_2), \ldots, [t_{k-1}+1, t_k), [t_k+1, \infty)
+            \]
+            Ezek az intervallumok biztosítják, hogy az ágens csak olyan időpontokban foglal el egy cellát, amikor az szabad.
+
+            \item \textbf{Várakozás kezelése:} Az algoritmus figyelembe veszi a várakozás lehetőségét is, ha egy cellában biztonságosan várakozhat az ágens, amíg egy másik ágens elhalad. Matematikailag ez azt jelenti, hogy ha egy $v$ csomópontban az ágens a $t$ időpontban van, és a következő biztonságos intervallum csak $t' > t$ időpontban kezdődik, akkor az ágens várakozhat a $v$ csomópontban a $[t, t')$ intervallumban. A várakozás költsége $t' - t$.
+
+            \item \textbf{Cél kezelése:} Speciális kezelést alkalmaz a célpozíciókra, biztosítva, hogy az ágensek ne zavarják egymás célját, és megfelelő időben érkezzenek oda. Matematikailag, ha egy ágens eléri a $g$ célcsomópontot a $t$ időpontban, akkor csak akkor tekintjük sikeresnek, ha $t \geq T_{hold}$, ahol $T_{hold}$ a \texttt{getHoldingTime()} függvény által meghatározott minimális várakozási idő a célcsomópontban:
+            \[
+            T_{hold} = \max\{t \mid \exists j \neq i: v_j^t = g\}
+            \]
+            Ez biztosítja, hogy az ágens csak akkor tekinti elértnek a célt, ha már nincs ütközés a célpozícióban.
+
+            \item \textbf{Dominancia ellenőrzés:} A hatékonyság érdekében az algoritmus kiszűri a redundáns keresési utakat. Ha két csomópont ugyanazt az állapotot reprezentálja, csak a jobb tulajdonságokkal rendelkezőt tartja meg. Matematikailag, egy új csomópont $(v, t_{new}, I_{new}, c_{new})$ dominálja a régi $(v, t_{old}, I_{old}, c_{old})$ csomópontot, ha:
+            \[
+            t_{new} \leq t_{old} \text{ és } c_{new} \leq c_{old}
+            \]
+            ahol $t$ az érkezési idő (radar zónákon való áthaladások által növelve), $c$ pedig a soft ütküzések száma.
+        \end{itemize}
+
+        A véletlenszerű kiválasztás helyett definiálják az adaptív lns2 súlyozott megoldását, de jelenleg ezt nem tartalmazza a kód, később bele lehet majd építeni.
+
+    \end{enumerate}
+
+    \item \textbf{Megállási feltétel:} Az algoritmus addig fut, amíg az alábbi feltételek egyike teljesül:
+    \begin{itemize}
+        \item Az iterációk száma eléri a maximális értéket: $\text{iteration} \geq \text{max\_iterations}$
+        \item Nincs több ütközés: $|\text{Conflicts}(\Pi)| = 0$
+        \item Az algoritmus futási ideje eléri az előre meghatározott időkorlátot
+    \end{itemize}
+\end{enumerate}
+
+\begin{algorithm}[H]
+\caption{LNS2 Algoritmus Részletes Pszeudokódja}
+\begin{algorithmic}[1]
+\Procedure{LNS2}{$G, \{s_i\}, \{g_i\}, n, max\_iterations, time\_limit$}
+    \State $\Pi \gets \emptyset$ \Comment{Üres útvonalhalmaz inicializálása}
+    \State $path\_table \gets \text{PathTable}(map\_size, n)$ \Comment{Útvonal-tábla létrehozása}
+    \For{$i \gets 1$ to $n$} \Comment{Kezdeti útvonalak generálása}
+        \State $constraint\_table \gets \text{ConstraintTable}(num\_cols, map\_size, path\_table)$
+        \State $\pi_i \gets \text{SIPP}(G, s_i, g_i, constraint\_table)$ \Comment{Egyéni útvonaltervezés}
+        \State $path\_table.insertPath(i, \pi_i)$ \Comment{Útvonal beilleszttése a táblába}
+        \State $\Pi \gets \Pi \cup \{\pi_i\}$
+    \EndFor
+    \State $iteration \gets 0$
+    \State $start\_time \gets \text{CurrentTime}()$
+    \While{$iteration < max\_iterations$ \textbf{and} $\text{CurrentTime}() - start\_time < time\_limit$}
+        \State $colliding\_pairs \gets \emptyset$ \Comment{Ütköző ügynökpárok halmaza}
+        \For{$i \gets 1$ to $n$}
+            \State $updateCollidingPairs(colliding\_pairs, i, \pi_i)$ \Comment{Ütközések detektálása}
+        \EndFor
+        \If{$colliding\_pairs = \emptyset$}
+            \State \textbf{break} \Comment{Megoldás megtalálva}
+        \EndIf
+        \State $A \gets \text{GetAgentsToReplan}()$ \Comment{Újratervezendő ügynökök kiválasztása (külső hívó kód által)}
+        \For{$i \in A$}
+            \State $path\_table.deletePath(i)$ \Comment{Útvonal törlése a táblából}
+        \EndFor
+        \State $constraint\_table \gets \text{ConstraintTable}(num\_cols, map\_size, path\_table)$
+        \For{$i \in A$}
+            \State $\pi_i \gets \text{SIPP}(G, s_i, g_i, constraint\_table)$ \Comment{Újratervezés}
+            \If{$\pi_i = \emptyset$} \Comment{Ha nem található útvonal}
+                \State $\pi_i \gets \{s_i\}$ \Comment{Fallback: helyben maradás}
+            \EndIf
+            \State $path\_table.insertPath(i, \pi_i)$ \Comment{Útvonal beilleszttése a táblába}
+            \State $updateCollidingPairs(colliding\_pairs, i, \pi_i)$ \Comment{Ütközések frissítése}
+        \EndFor
+        \State $iteration \gets iteration + 1$
+    \EndWhile
+    \State \textbf{return} $\Pi$
+\EndProcedure
+\end{algorithmic}
+\end{algorithm}
+
+\section{A SIPP Algoritmus}
+
+\subsection{A SIPP Algoritmus Matematikai Alapjai}
+
+A Safe Interval Path Planning (SIPP) algoritmus az A* egy kiterjesztése, amely hatékonyan kezeli az időben változó környezeteket. A SIPP kulcsfontosságú koncepciója a "biztonságos időintervallum" (Safe Interval), amely egy olyan folytonos időszakasz, amikor egy adott csomópont biztonságosan elérhető és ott tartózkodhat egy ügynök.
+
+Formálisan, egy biztonságos időintervallum egy $[t_{start}, t_{end})$ pár, ahol:
+\begin{itemize}
+    \item $t_{start}$ az intervallum kezdő időpontja
+    \item $t_{end}$ az intervallum záró időpontja (nem beleértve)
+\end{itemize}
+
+A SIPP algoritmus minden csomópontot a következő négyessel reprezentál:
 \[
 (v,\, t,\, I,\, c)
 \]
 ahol:
-\begin{itemize}[label=\textbullet]
-    \item $v$ – az aktuális helyszín,
-    \item $t$ – az aktuális időlépés,
-    \item $I$ – a biztonságos intervallum (az az időintervallum, amikor az $v$ cella szabad),
-    \item $c$ – az eddig megszerzett soft ütközések száma.
+\begin{itemize}
+    \item $v \in V$ – az aktuális csomópont,
+    \item $t \in \mathbb{R}^+$ – az aktuális időlépés,
+    \item $I = [t_{start}, t_{end})$ – a biztonságos időintervallum,
+    \item $c \in \mathbb{N}$ – az eddig megszerzett soft ütközések száma (radar zónákon való áthaladások).
 \end{itemize}
 
-A keresés célja, hogy minimális $f$-értékkel rendelkező útvonalat találjon:
+\subsection{A SIPP Algoritmus Működése}
+
+A SIPP algoritmus az A* kiterjesztéseként működik, de a hagyományos idő-indexelt csomópontok helyett biztonságos intervallumokat használ. Az algoritmus a következő lépésekből áll:
+
+\begin{enumerate}
+    \item \textbf{Biztonságos időintervallumok inicializálása:}
+    Minden $v \in V$ csomóponthoz kezdetben egy végtelen biztonságos intervallumot rendelünk: $[0, \infty)$.
+
+    \item \textbf{Időintervallumok feldarabolása:}
+    Feljebb kifejtve.
+
+    \item \textbf{Kezdőcsomópont hozzáadása:}
+    \begin{itemize}
+        \item $n_{start} = (s, 0, I_s, 0)$, ahol $I_s$ a kezdőcsomópont első biztonságos időintervalluma
+        \item $g(n_{start}) \gets 0$ (a kezdőcsomópontig vezető út költsége)
+        \item $h(n_{start}) \gets h(s, g)$ (heurisztikus érték a célig)
+        \item $f(n_{start}) \gets g(n_{start}) + h(n_{start})$
+        \item $\text{open}.\text{add}(n_{start})$
+    \end{itemize}
+
+    \item \textbf{Keresés:}
+    Amíg $\text{open}$ nem üres:
+    \begin{itemize}
+        \item Válasszuk ki a legkisebb $f$-értékű csomópontot: $n = (v, t, I, c) \gets \text{open}.\text{pop}()$
+        \item Ha $v = g$ és $t \geq \text{getHoldingTime}(g)$, térjünk vissza a megtalált útvonalakkal
+        \item Addduk hozzá $n$-t a $\text{closed}$ halmazhoz
+        \item Futtassuk le a következő lépéseket minden $v'$ szomszédjére $v$-nek:
+            \begin{itemize}
+                \item Kiszámítjuk a $v'$-hez tartozó biztonságos intervallumokat
+                \item Futtassuk le a következő lépéseket minden $I'$ biztonságos intervallumra $v'$-hez:
+                    \begin{itemize}
+                        \item Kiszámítjuk az érkezési időt: $t' = t + \text{cost}(v, v')$
+                        \item Ha $t' \in I'$, akkor:
+                            \begin{itemize}
+                                \item Kiszámítjuk az új soft ütközések számát: $c'$
+                                \item Létrehozzuk az új csomópontot: $n' = (v', t', I', c')$
+                                \item Ha $n' \notin \text{closed}$ és $n' \notin \text{open}$, akkor:
+                                    \begin{itemize}
+                                        \item $n'.g \gets t'$
+                                        \item $n'.h \gets h(v', g)$
+                                        \item $n'.f \gets n'.g + n'.h$
+                                        \item $\text{open}.\text{add}(n')$
+                                    \end{itemize}
+                                \item Ha $n' \in \text{open}$ és $t' < n'.g$, akkor:
+                                    \begin{itemize}
+                                        \item $n'.g \gets t'$
+                                        \item $n'.f \gets n'.g + n'.h$
+                                        \item $\text{open}.\text{update}(n')$
+                                    \end{itemize}
+                            \end{itemize}
+                    \end{itemize}
+            \end{itemize}
+    \end{itemize}
+
+    \item Ha $\text{open}$ üres, térjünk vissza a nem talált útvonalakkal
+\end{enumerate}
+
+\subsection{Heurisztika és Költségfüggvény}
+
+A SIPP algoritmus a következő $f$-értéket használja a csomópontok prioritásának meghatározásához:
 \[
 f = g + h,
 \]
 ahol
 \begin{itemize}[label=\textbullet]
-    \item $g$ a megtett időlépések száma, 
+    \item $g$ a megtett időlépések száma,
     \item $h$ a következő képlettel számított heurisztika:
     \[
     h = \max\Big\{\, h_{SIPP}(v),\, T_{hold},\, T_{last}+1 \,\Big\}.
@@ -51,44 +284,36 @@ Itt:
 
 A keresés a \emph{focal\_listből} veszi ki az aktuális legjobb csomópontot. Amikor a célcsomópontot eléri, a \texttt{updatePath(...)} függvény visszaköveti a szülő mutatókon keresztül az egész, időindexelt útvonalat.
 
-A \texttt{dominanceCheck(...)} függvény során két azonos helyszínű csomópontot hasonlítunk össze:
-\[
-\text{Új csomópont } (v, t_{\text{new}}, I_{\text{new}}, c_{\text{new}}) \quad \text{dominálja a régi } (v, t_{\text{old}}, I_{\text{old}}, c_{\text{old}}) \quad \text{ha } t_{\text{new}} \le t_{\text{old}} \text{ és } c_{\text{new}} \le c_{\text{old}}.
-\]
-
-\subsection{Dinamikus Akadályok Kezelése}
-A hagyományos MAPF megközelítésekkel ellentétben, amelyek minden akadályt kemény korlátként kezelnek, a mi implementációnk a dinamikus akadályokat (radar zónákat) puha korlátokként vesszük fel. 
-
-\begin{itemize}
-    \item \textbf{Puha Korlátok:} A dinamikus akadályok növelik a mozgási költséget (1-ről 3-ra) ahelyett, hogy teljesen blokkolnák a mozgást
-    \item \textbf{Heurisztikus Integráció:} Mind az ütközési konfliktusok, mind a dinamikus akadályok befolyásolják a heurisztikus érték számítását
-    \item \textbf{Rugalmas Útvonalkeresés:} Az algoritmus áthaladhat radar zónákon, ha az előnyös a teljes megoldás szempontjából
-    \item \textbf{Költség-Haszon Elemzés:} Automatikusan mérlegeli a hosszabb kerülőutak költségét a büntetett zónákon keresztül vezető rövidebb útvonalakkal szemben
-\end{itemize}
-
-Ez a megközelítés lehetővé teszi az algoritmus számára, hogy olyan útvonalakat találjon, amelyek alkalmanként áthaladnak radar zónákon, amikor ez globálisan jobb megoldást eredményez, miközben általában elkerüli ezeket a területeket, ha léteznek alternatívák.
-
-Jelenleg nincs beépítve súlyozás a radar mezők közepére, de ezt is meg lehet tenni később. 
+A \texttt{dominanceCheck(...)} függvény során két azonos helyszínű csomópontot hasonlítunk össze, ami után majd a kisebb költségűt választjuk. 
 
 \subsection{SingleAgentSolver.cpp}
 \textbf{Cél:} Támogatja az együgynökös keresést azáltal, hogy előállítja a célhoz vezető heurisztikákat és meghatározza az ütköző célok minimális készletét.
 
 \begin{itemize}[label=\textbullet]
-    \item \texttt{compute\_heuristics()}:  
-    Ez a függvény egy fordított Dijkstra keresést alkalmaz a célból kiindulva, így minden cellához meghatározza a cél felé vezető optimális távolságot. 
-    
-    \item \texttt{findMinimumSetofCollidingTargets(...)}:
-    Ez a függvény egy A*-szerű keresést hajt végre, melynek célja az ütköző célpozíciók minimalizálása. Minden csomóponthoz tartozik egy \texttt{num\_of\_targets} érték, amely azt jelzi, hogy az adott csomópont útvonalán hány olyan célpozíciót érintünk, ahol már egy másik ügynök végcélt ért el.
+    \item \texttt{compute\_heuristics()}:
+        \begin{itemize}
+            \item Előzetesen kiszámítja a Manhattan távolságokat minden cellától a célig
+        \end{itemize}
+
+    \item \texttt{findPath()}:
+        \begin{itemize}
+            \item A SIPP algoritmus fő implementációja, ami magát a fent definiált keresést hajtja végre
+        \end{itemize}
+
+    \item \texttt{dominanceCheck()}:
+        \begin{itemize}
+            \item Ellenőrzi, hogy egy új csomópont dominálja-e a régieket, amely során a kisebb időlépéssel és kevesebb soft ütközéssel rendelkező csomópont dominál
+        \end{itemize}
 \end{itemize}
 
 \subsection{ReservationTable.cpp}
 \textbf{Cél:} A cellák biztonságos intervallumainak (Safe Intervals, SIT) kezelését valósítja meg.
 
 \begin{itemize}[label=\textbullet]
-    \item \texttt{updateSIT(...)}:  
+    \item \texttt{updateSIT(...)}:
     Frissíti az adott cellához tartozó SIT-t, figyelembe véve a soft korlátozásokat.
 
-    \item \texttt{get\_safe\_intervals(...)}:  
+    \item \texttt{get\_safe\_intervals(...)}:
     Megkeresi azokat a biztonságos intervallumokat a célcellához, amelyek átfednek egy adott alsó és felső időhatárral.
 \end{itemize}
 
@@ -96,18 +321,12 @@ Jelenleg nincs beépítve súlyozás a radar mezők közepére, de ezt is meg le
 \textbf{Cél:} A "soft" útvonalakat követi nyomon, azaz rögzíti, hogy mely ügynök mely cellát foglal el adott időpillanatban.
 
 \begin{itemize}[label=\textbullet]
-    \item \texttt{insertPath(...)}:  
-    Egy ügynök útvonalát illeszti be a táblázatba.
-    
-    \item \texttt{deletePath(...)}:  
-    Eltávolítja az adott ügynök útvonalát a táblázatból.
-    
     \item \textbf{Ütközésdetektáló segédfüggvények:}
     \begin{itemize}
-        \item \texttt{getFutureNumOfCollisions(...)}:  
-        Számolja, hogy egy adott cellában egy bizonyos időpont után hány ügynök fog tartózkodni.
-        
-        \item \texttt{hasEdgeCollisions(...)}:  
+        \item \texttt{getFutureNumOfCollisions(...)}:
+        Számolja, hogy egy adott cellában egy bizonyos időpont után hány ügynök fog tartózkodni. Főleg a célbaérkezés után fontos: "Fog-e ezután ott másik ügynök áthaladni vagy maradhatok?"
+
+        \item \texttt{hasEdgeCollisions(...)}:
         Ellenőrzi az él ütközéseket, azaz azt, hogy két ügynök ellentétes irányban halad-e ugyanazon él mentén.
     \end{itemize}
 \end{itemize}
@@ -118,29 +337,15 @@ Jelenleg nincs beépítve súlyozás a radar mezők közepére, de ezt is meg le
 \begin{itemize}[label=\textbullet]
     \item \textbf{Inicializáció:}
     Az ütközéses térkép és az ügynökök start/cél pozíciói betöltődnek, majd egy \texttt{Instance} objektumot hoz létre.
-    
-    \item \textbf{init\_pp()}:  
+
+    \item \textbf{init\_pp()}:
     Inicializálja a szomszédsági listát és minden ügynök esetében meghívja a SIPP algoritmust az útvonal kiszámítására.
-    
+
     \item \textbf{Ütközésdetektálás és újratervezés:}
     \begin{itemize}
-        \item \texttt{updateCollidingPairs(...)}: Felderíti a különböző típusú ütközéseket az ügynökök között:
-            \begin{itemize}
-                \item \textbf{Vertex ütközések:} Amikor két vagy több ügynök ugyanazon a cellán tartózkodik ugyanabban az időpontban.
-                \item \textbf{Edge ütközések:} Amikor két ügynök ellentétes irányban halad ugyanazon az élen (pl. A→B és B→A) ugyanabban az időlépésben.
-                \item \textbf{Cél ütközések:} Amikor egy ügynök olyan cellán halad át, amely egy másik ügynök célpozíciója, és az a másik ügynök már elérte a célját.
-            \end{itemize}
-            A függvény minden ütközést rögzít a \texttt{colliding\_pairs} halmazban, amely ügynökpárokat tartalmaz.
-            
-        \item \texttt{calculate\_sipps(...)}: Újratervezi a kijelölt ügynökök útvonalait a következő lépésekkel:
-            \begin{itemize}
-                \item Törli az újratervezésre kijelölt ügynökök jelenlegi útvonalait a \texttt{path\_table}-ből.
-                \item Létrehoz egy \texttt{ConstraintTable} objektumot a frissített \texttt{path\_table} alapján.
-                \item Minden kijelölt ügynök számára meghívja a SIPP algoritmust az új, ütközésmentes útvonal kiszámítására.
-                \item Ha egy ügynök számára nem található megfelelő útvonal, fallback stratégiát alkalmaz (pl. helyben maradás).
-                \item Az új útvonalakat beilleszti a \texttt{path\_table}-be és frissíti a \texttt{colliding\_pairs} halmazt.
-            \end{itemize}
-            A függvény visszatér a fennmaradó ütközések számával, amely az LNS algoritmus minőségi mérőszámaként szolgál.
+        \item \texttt{updateCollidingPairs(...)}: Felderíti a különböző típusú ütközéseket az ügynökök között.
+
+        \item \texttt{calculate\_sipps(...)}: Újratervezi a kijelölt ügynökök útvonalait (fent kifejtve).
     \end{itemize}
 \end{itemize}
 
@@ -148,125 +353,146 @@ Jelenleg nincs beépítve súlyozás a radar mezők közepére, de ezt is meg le
 \textbf{Cél:} Dinamikus korlátozások kezelésére szolgál, amely nyilvántartja az ügynökök közötti ütközéseket és időbeli korlátokat.
 
 \begin{itemize}[label=\textbullet]
-    \item \texttt{getLastCollisionTimestep(location)}: 
+    \item \texttt{getLastCollisionTimestep(location)}:
         \begin{itemize}
             \item Lekérdezi, hogy egy adott cellában mikortól van ütközés más ügynökökkel.
-            \item A \texttt{path\_table\_for\_CAT} adatstruktúrát használja, amely tartalmazza az összes ügynök aktuális útvonalát.
-            \item Ha a cellában nincs ütközés, -1 értékkel tér vissza.
-            \item Ez az információ kritikus a biztonságos várakozási idők meghatározásához.
         \end{itemize}
-        
-    \item \texttt{getHoldingTime(earliest\_timestep)}: 
+
+    \item \texttt{getHoldingTime(earliest\_timestep)}:
         \begin{itemize}
             \item Meghatározza azt a legkorábbi időpontot, amikor egy ügynök biztonságosan tartózkodhat egy adott cellában az \texttt{earliest\_timestep} után.
-            \item Figyelembe veszi a más ügynökök által okozott jövőbeli ütközéseket.
-            \item Különösen fontos a célpozícióknál, ahol az ügynöknek esetleg várnia kell, mielőtt "befejezettnek" tekinthető.
-            \item A SIPP algoritmus ezt az információt használja annak eldöntésére, hogy egy csomópont célfeltételnek tekinthető-e.
         \end{itemize}
-        
+
     \item \texttt{hasEdgeConflict(curr\_id, next\_id, next\_timestep)}:
         \begin{itemize}
-            \item Ellenőrzi, hogy két cella között történik-e él ütközés egy adott időpontban.
-            \item Az él ütközés akkor következik be, amikor két ügynök ellentétes irányban próbál áthaladni ugyanazon az élen.
-            \item A \texttt{path\_table\_for\_CAT} adatstruktúrát használja az ütközések ellenőrzésére.
+            \item Ellenőrzi, hogy két cella között van-e él ütközés.
         \end{itemize}
-        
+
     \item \texttt{getFutureNumOfCollisions(loc, t)}:
         \begin{itemize}
-            \item Megszámolja, hogy egy adott cellában egy adott időpont után hány ügynök fog tartózkodni.
-            \item Ez az információ segít a SIPP algoritmusnak elkerülni a jövőbeli ütközéseket.
-            \item Különösen fontos a célpozíciók kezelésénél, ahol az ügynököknek esetleg várniuk kell.
+            \item Visszadja, hogy egy adott cellában egy adott időpont után hány ügynök fog tartózkodni.
         \end{itemize}
-\end{itemize}
-
-\section{Vizualizáció}
-
-\textbf{\color{blue}A rendszer a következő elemeket jeleníti meg:}
-\begin{itemize}[label=\textbullet]
-    \item \color{blue}Ügynök kezdőpozíciója (piros)
-    \item \color{blue}Ügynök célpozíciója (zöld)
-    \item \color{blue}Aktuális útvonal (narancssárga)
-    \item \color{blue}Dinamikus akadályok minden időlépésben
-    \item \color{blue}Más ügynökök kezdőpozíciói (barna)
-    \item \color{blue}Más ügynökök célpozíciói (rózsaszín)
-    \item \color{blue}Más ügynökök útvonalai (világoskék)
-    \item \color{blue}Soft ütközési pontok (sárga)
-    \item \color{blue}Aktuális keresési csomópont (élénkpiros)
-\end{itemize}
-
-\section{Kiemelt Trükkök és Megvalósítási Részletek}
-\begin{itemize}[label=\textbullet]
-    \item \textbf{Biztonságos Intervallumok:}  
-    A ReservationTable a cellákra vonatkozó biztonságos időintervallumokat számolja ki.
-    
-    \item \textbf{Dominancia Ellenőrzés:}  
-    A generált csomópontok hash-táblán keresztül történő dominancia ellenőrzése segít az iteratív keresés hatékonyságának növelésében.
-    
-    \item \textbf{Heurisztikák Számítása:}  
-    A célból induló fordított kereséssel kiszámított heurisztikák segítik a SIPP gyors és optimális keresését.
-    
-    \item \textbf{\color{blue}Rerun Vizualizáció:}  
-    \color{blue}A rendszer valós időben vizualizálja a keresési folyamatot, beleértve az aktuális csomópontot, az útvonalat és a soft ütközési pontokat.
 \end{itemize}
 
 \section{Algoritmus Futása}
 
-Az LNS2 algoritmus futása a következő lépésekből áll:
+Az alábbiakban egy konkrét példán keresztül követjük végig az LNS2 algoritmus futását, mintha debug módban lépkednénk végig a program végrehajtásán:
 
-\begin{enumerate}
-    \item \textbf{Inicializáció:}
-        \begin{itemize}
-            \item A térkép és az ügynökök start/cél pozícióinak betöltése
-            \item Az \texttt{init\_pp()} függvény meghívása, amely inicializálja a szomszédsági listát
-            \item Minden ügynök számára kezdeti útvonal kiszámítása a SIPP algoritmussal
-            \item A \texttt{PathTable} feltöltése a kezdeti útvonalakkal
-        \end{itemize}
-    
-    \item \textbf{Iteratív Optimalizáció:}
-        \begin{itemize}
-            \item Az \texttt{updateCollidingPairs()} függvény azonosítja az ütköző ügynökpárokat
-            \item Kiválasztja az újratervezendő ügynökök halmazát (általában az ütköző ügynökök 10-30\%-a)
-            \item A \texttt{calculate\_sipps()} függvény törli a kiválasztott ügynökök útvonalait
-            \item Létrehoz egy új \texttt{ConstraintTable} objektumot a fennmaradó útvonalak alapján
-            \item Minden kiválasztott ügynök számára új útvonalat tervez a SIPP algoritmussal
-        \end{itemize}
-    
-    \item \textbf{SIPP Futása Egy Ügynökre:}
-        \begin{itemize}
-            \item A \texttt{compute\_heuristics()} előzetesen kiszámítja a célhoz vezető távolságokat
-            \item A \texttt{getLastCollisionTimestep()} és \texttt{getHoldingTime()} függvények meghatározzák a biztonságos időintervallumokat
-            \item A \texttt{updateSIT()} frissíti a biztonságos intervallumokat, figyelembe véve a dinamikus akadályokat
-            \item A keresés a \texttt{focal\_list}-ből veszi ki az aktuális legjobb csomópontot
-            \item A \texttt{dominanceCheck()} ellenőrzi, hogy az új csomópont dominálja-e a régieket
-            \item Amikor a célcsomópontot eléri, az \texttt{updatePath()} visszaköveti az útvonalat
-        \end{itemize}
-    
-    \item \textbf{Dinamikus Akadályok Kezelése:}
-        \begin{itemize}
-            \item A radar zónák puha korlátként jelennek meg, megnövelt mozgási költséggel (1-ről 3-ra)
-            \item Az algoritmus automatikusan mérlegeli a kerülőutak költségét a radar zónákon áthaladással szemben
-            \item A heurisztikus érték számításánál figyelembe veszi mind az ütközéseket, mind a dinamikus akadályokat
-        \end{itemize}
-    
-    \item \textbf{Megállási Feltétel:}
-        \begin{itemize}
-            \item Az algoritmus addig fut, amíg el nem éri a maximális iterációszámot (általában 100-1000)
-            \item Vagy amíg az ütközések száma nullára nem csökken
-            \item Vagy amíg egy előre meghatározott időkorlátot el nem ér
-        \end{itemize}
-\end{enumerate}
+\begin{verbatim}
+[Példa: 4 ügynök, 10x10-es térkép, 2 dinamikus akadállyal]
 
-Egy tipikus futás során az algoritmus kezdetben sok ütközéssel rendelkező útvonalakat generál, majd az iteratív újratervezés során fokozatosan csökkenti az ütközések számát. Az újratervezés mindig csak az ügynökök egy részhalmazára történik (általában 10-30\%), ami lehetővé teszi a nagy problémák hatékony kezelését is. A dinamikus akadályok kezelése minden iterációban megtörténik, így az algoritmus képes alkalmazkodni a változó környezethez.
+1. main() -> Inicializáció
+   |
+   ├─ Map::loadMap("dinamikus map") -> Térkép betöltése (10x10, 2 akadály)
+   |
+   ├─ Instance::readAgents("agent koords") -> 4 ügynök adatainak beolvasása
+   |  
+   ├─ init_pp() -> Előfeldolgozás
+   |  |
+   |  └─ buildNeighborhood() -> Szomszédsági lista létrehozása minden cellához
+   |
+   ├─ Minden ügynökhöz (id: 0,1,2,3):
+   |  |
+   |  ├─ compute_heuristics(agent_id, goal) -> Manhattan távolságok előszámítása (Dijkstra) 
+   |  |  └─ [Eredmény: Heurisztika mátrix minden ügynökhöz]
+   |  |
+   |  └─ findPath(agent_id) -> Kezdeti útvonalak számítása SIPP-pel
+   |     |
+   |     ├─ focal_list.push(start_node) -> Kezdőcsomópont hozzáadása (f=10, g=0, h=10)
+   |     ├─ while(!focal_list.empty()) -> SIPP keresés
+   |     |  ├─ curr = focal_list.top() -> Legjobb csomópont kivétele (loc=(1,1), t=0)
+   |     |  ├─ generateChild() -> Szomszédos csomópontok generálása
+   |     |  |  └─ updateSIT() -> Biztonságos időintervallumok frissítése
+   |     |  └─ dominanceCheck() -> Új csomópont dominancia ellenőrzése
+   |     └─ updatePath() -> Útvonal visszakövetése a célcsomóponttól
+   |
+   └─ path_table.insertPath(agent_id, path) -> Kezdeti útvonalak tárolása
+
+2. updateCollidingPairs() -> Ütközések detektálása
+   |
+   ├─ [Eredmény: 2 ütközés detektálva]
+   |  ├─ Ütközés: agent_0 és agent_1 között (t=5, loc=(4,3))
+   |  └─ Ütközés: agent_2 és agent_3 között (t=7, loc=(6,8))
+   |
+   └─ colliding_pairs = {(0,1), (2,3)} -> Ütköző párok tárolása
+
+3. Fő iterációs ciklus (python)
+   |
+   └─ Iteráció #1:
+      |
+      ├─ neighborhood_size = 2 -> Újratervezendő ügynökök száma
+      |
+      ├─ agents_to_replan = {0, 2} -> Véletlenszerűen kiválasztott ügynökök
+      |
+      ├─ calculate_sipps(agents_to_replan) -> Újratervezés
+      |  |
+      |  ├─ path_table.deletePath(0) -> 0. ügynök útvonalának törlése
+      |  ├─ path_table.deletePath(2) -> 2. ügynök útvonalának törlése
+      |  |
+      |  ├─ ConstraintTable ct(path_table) -> Korlátozások létrehozása
+      |  |  └─ [Eredmény: 1. és 3. ügynök útvonalai mint korlátozások]
+      |  |
+      |  ├─ findPath(0, ct) -> 0. ügynök újratervezése
+      |  |  |
+      |  |  ├─ getLastCollisionTimestep(loc) -> Ütközések időpontjainak lekérdezése
+      |  |  |  └─ [Eredmény: (4,3) cellában t=5 időpontban ütközés]
+      |  |  |
+      |  |  ├─ getHoldingTime(t) -> Várakozási idő számítása
+      |  |  |  └─ [Eredmény: (4,3) cellában t=6-ig kell várni]
+      |  |  |
+      |  |  ├─ hasDynamicObstacle(loc, t) -> Dinamikus akadály ellenőrzése
+      |  |  |  └─ [Eredmény: (5,4) cellában t=3..6 között radar zóna]
+      |  |  |
+      |  |  ├─ getMoveCost() -> Lépésköltség számítása
+      |  |  |  └─ [Eredmény: Normál cella=1, Radar zóna=3]
+      |  |  |
+      |  |  └─ [Új útvonal: 0. ügynök kerüli az 1. ügynököt és a radar zónát]
+      |  |
+      |  ├─ path_table.insertPath(0, new_path) -> Új útvonal tárolása
+      |  |
+      |  ├─ findPath(2, ct) -> 2. ügynök újratervezése
+      |  |  └─ [Új útvonal: 2. ügynök kerüli a 3. ügynököt]
+      |  |
+      |  └─ path_table.insertPath(2, new_path) -> Új útvonal tárolása
+      |
+      └─ updateCollidingPairs() -> Ütközések újraellenőrzése
+         └─ [Eredmény: 1 ütközés maradt: agent_2 és agent_3 között]
+
+   └─ Iteráció #2:
+      |
+      ├─ agents_to_replan = {2, 3} -> Ütköző pár kiválasztása
+      |
+      ├─ calculate_sipps({2, 3}) -> Újratervezés
+      |  |
+      |  ├─ [Útvonalak törlése és újratervezése...]
+      |  |
+      |  └─ [Új útvonalak: mindkét ügynök kerüli egymást]
+      |
+      └─ updateCollidingPairs() -> Ütközések újraellenőrzése
+         └─ [Eredmény: 0 ütközés, megoldás megtalálva!]
+
+4. Eredmény: Minden ügynök ütközésmentes útvonala
+   |
+   ├─ agent_0: (1,1) -> (2,1) -> (3,2) -> ... -> (8,8)  [12 lépés]
+   ├─ agent_1: (2,2) -> (3,2) -> (4,2) -> ... -> (5,5)  [9 lépés]
+   ├─ agent_2: (3,3) -> (3,4) -> (4,4) -> ... -> (7,7)  [10 lépés]
+   └─ agent_3: (5,5) -> (5,6) -> (6,6) -> ... -> (2,2)  [11 lépés]
+\end{verbatim}
+
+A fenti példában látható, hogy az algoritmus először inicializálja a környezetet, majd minden ügynök számára kiszámítja a kezdeti útvonalakat. Ezután detektálja az ütközéseket, és iteratívan újratervezi az ügynökök útvonalait. Minden iterációban kiválaszt néhány ügynököt (vagy az ütköző párokat), törli az útvonalaikat, majd újratervezi azokat a többi ügynök útvonalát figyelembe véve. A SIPP algoritmus a biztonságos időintervallumokat használja, és figyelembe veszi a dinamikus akadályokat is. Az algoritmus addig fut, amíg minden ütközést fel nem old, vagy el nem éri a maximális iterációszámot vagy időkorlátot. Nyilván ez egy egyszerű és elméleti példa és egy nagyobb térképen várakozás helyett valószínűleg egy másik útvonal lenne kiválasztva, de szemléltetés szempontjából így volt egyszerű. 
 
 \section{Összefoglalás}
 A MAPF-LNS2 implementációja a következő fő komponensekből áll:
 \begin{enumerate}[label=\arabic*.]
-    \item \textbf{SIPP modul:} Biztonságos intervallum alapú együttes ügynök útvonaltervezés.
-    \item \textbf{SingleAgentSolver:} Heurisztikák számítása és minimális ütköző célok meghatározása.
-    \item \textbf{ReservationTable:} Biztonságos időintervallumok számítása.
-    \item \textbf{PathTable:} Az ügynökök útvonalainak nyomon követése.
-    \item \textbf{MyLns2:} A magas szintű LNS ciklus implementációja.
-    \item \textbf{\color{blue}Dinamikus akadályok:} \color{blue}A rendszer képes kezelni a dinamikus akadályok "radar" zónáit soft ütközésként.
+    \item \textbf{SIPP modul:} Biztonságos intervallum alapú együgynökös útvonaltervezés, amely figyelembe veszi a többi ügynök útvonalát mint korlátozást.
+    \item \textbf{SingleAgentSolver:} Heurisztikák számítása és együgynökös útvonaltervezés absztrakt osztálya.
+    \item \textbf{PathTable és ConstraintTable:} Két különböző, de egymással szorosan összefüggő adatstruktúra:
+        \begin{itemize}
+            \item \textbf{PathTable:} Az ügynökök aktuális útvonalainak tárolására szolgál.
+            \item \textbf{ConstraintTable:} A \texttt{PathTable} alapján épül fel, és a korlátozásokat reprezentálja, amelyeket a SIPP algoritmusnak figyelembe kell vennie (származtatott információkat tárol).
+        \end{itemize}
+    \item \textbf{MyLns2:} A magas szintű LNS ciklus implementációja, amely a \texttt{calculate\_sipps()} függvényen keresztül végzi az ügynökök útvonalainak újratervezését. A függvény paraméterként kapja meg az újratervezendő ügynökök azonosítóit, ami jelenleg egy random válaszott ágens részhalmaz (Adaptív LNS2 lehetősége.)
+    \item \textbf{Dinamikus akadályok:} A rendszer a \texttt{getMoveCost()} függvényen keresztül kezeli a dinamikus akadályok "radar" zónáit, magasabb költséget (3) rendelve hozzájuk. A dinamikus akadályok pozíciói az előre definiált \texttt{dynamic\_map\_seq} adatstruktúrában találhatók, ahol a 0.1 és 0.9 közötti értékek jelzik a radar zónákat.
 \end{enumerate}
 
 \end{document}

@@ -1,0 +1,51 @@
+{
+  "metadata": {
+    "manhattan_distances": [
+      207,
+      143,
+      189,
+      163,
+      176
+    ],
+    "avg_manhattan_distance": 175.6,
+    "num_agents": 5,
+    "timestamp": "2025-05-22 08:06:18"
+  },
+  "results": [
+    {
+      "algorithm": "Original LNS2",
+      "runtime": 2.5258655071258547,
+      "path_lengths": 181.59999999999997,
+      "avg_path_length": 181.59999999999997,
+      "success_rate": 1.0,
+      "iterations": 0.0,
+      "final_collisions": 0.0
+    },
+    {
+      "algorithm": "TJPS"
+    },
+    {
+      "algorithm": "Dynamic Drone (Before Kinematic)",
+      "path_lengths": 256.69999999999993,
+      "avg_path_length": 256.69999999999993,
+      "success_rate": 1.0,
+      "iterations": 0.0,
+      "final_collisions": 0.0
+    },
+    {
+      "algorithm": "Dynamic Drone Solution",
+      "runtime": 26.03644766807556,
+      "step_runtimes.step1": 6.00217342376709,
+      "step_runtimes.step2": 0.0007500410079956055,
+      "step_runtimes.step3": 0.10533430576324462,
+      "step_runtimes.step4": 19.23590989112854,
+      "step_runtimes.step5": 0.002171444892883301,
+      "step_runtimes.step6": 0.6901085615158081,
+      "initial_path_lengths": 251.74,
+      "avg_initial_path_length": 251.74,
+      "trajectory_lengths": 241.75354614136413,
+      "avg_trajectory_length": 241.75354614136413,
+      "success_rate": 1.0
+    }
+  ]
+}

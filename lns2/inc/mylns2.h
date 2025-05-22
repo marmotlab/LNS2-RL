@@ -17,7 +17,8 @@ enum init_destroy_heuristic { TARGET_BASED, COLLISION_BASED, RANDOM_BASED, INIT_
 class MyLns2 {
 public:
     // Constructor with dynamic map sequence
-    MyLns2(int seed, vector<vector<vector<int>>> dynamic_map_seq, vector<pair<int,int>> start_poss, vector<pair<int,int>> goal_poss, int all_ag_num, int map_size);
+    // Using float to handle GridMapEnv representation directly
+    MyLns2(int seed, vector<vector<vector<float>>> dynamic_map_seq, vector<pair<int,int>> start_poss, vector<pair<int,int>> goal_poss, int all_ag_num, int map_size);
 
     // Legacy constructor with static map only
     MyLns2(int seed, vector<vector<int>> obs_map, vector<pair<int,int>> start_poss, vector<pair<int,int>> goal_poss, int all_ag_num, int map_size);
@@ -48,6 +49,18 @@ public:
             }
         }
 #endif
+    }
+
+    // Set the visualization delay (in milliseconds)
+    // This function is always defined, but its implementation may be conditional
+    void setVisualizationDelay(int delay_ms) {
+        // Always update all agents' path planners, regardless of visualization settings
+        // The path planners will handle the conditional logic internally
+        for (auto& agent : agents) {
+            if (agent.path_planner) {
+                agent.path_planner->setVisualizationDelay(delay_ms);
+            }
+        }
     }
 
 private:

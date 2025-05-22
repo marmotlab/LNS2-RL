@@ -20,11 +20,12 @@ public:
 	int high_generation; // the upper bound with respect to generation
     int high_expansion; // the upper bound with respect to expansion
 	bool collision_v;  // if there is a collision
-    SIPPNode() : LLNode() {}
+    int consecutive_waits; // Track consecutive waiting actions
+    SIPPNode() : LLNode(), consecutive_waits(0) {}
 	SIPPNode(int loc, int g_val, int h_val, SIPPNode* parent, int timestep, int high_generation, int high_expansion,
-	        bool collision_v, int num_of_conflicts) :  // timestep=interval.low
+	        bool collision_v, int num_of_conflicts, int consecutive_waits = 0) :  // timestep=interval.low
             LLNode(loc, g_val, h_val, parent, timestep, num_of_conflicts), high_generation(high_generation),
-            high_expansion(high_expansion), collision_v(collision_v) {}
+            high_expansion(high_expansion), collision_v(collision_v), consecutive_waits(consecutive_waits) {}
 	// SIPPNode(const SIPPNode& other): LLNode(other), high_generation(other.high_generation), high_expansion(other.high_expansion),
         //                              collision_v(other.collision_v) {}
 	~SIPPNode() {}
@@ -35,6 +36,7 @@ public:
         high_generation = other.high_generation;
         high_expansion = other.high_expansion;
         collision_v = other.collision_v;
+        consecutive_waits = other.consecutive_waits;
     }
 	// The following is used by for generating the hash value of a nodes
 	struct NodeHasher
@@ -96,8 +98,8 @@ public:
     // Visualization-related members
     int num_expanded;  // number of nodes expanded
 
-    // For enhanced visualization
-#if RERUN_ENABLED
+    // For enhanced visualization and dynamic obstacle tracking
+    // These data structures are always defined, regardless of visualization settings
     // Other agents' information for visualization
     std::vector<int> other_agents_starts;  // Start positions of other agents
     std::vector<int> other_agents_goals;   // Goal positions of other agents
@@ -107,29 +109,44 @@ public:
     // Override virtual methods from SingleAgentSolver
     void setOtherAgentsInfo(const std::vector<int>& starts, const std::vector<int>& goals,
                            const std::vector<Path>& paths) override {
+#if RERUN_ENABLED
+        // Only store this data if visualization is enabled
         if (!use_rerun) return;
+#endif
         other_agents_starts = starts;
         other_agents_goals = goals;
         other_agents_paths = paths;
     }
 
     void addSoftCollisionPoint(int location) override {
+#if RERUN_ENABLED
+        // Only store this data if visualization is enabled
         if (!use_rerun) return;
+#endif
         soft_collision_points.push_back(location);
     }
 
     void clearSoftCollisionPoints() override {
+#if RERUN_ENABLED
+        // Only clear if visualization is enabled
         if (!use_rerun) return;
+#endif
         soft_collision_points.clear();
     }
-#endif
+
+    // Set the visualization delay (in milliseconds)
+    void setVisualizationDelay(int delay_ms) override {
+        visualization_delay = delay_ms;
+    }
 
 	SIPP(const Instance& instance, int agent,const vector<int>& start_locations,const vector<int>& goal_locations):
 		SingleAgentSolver(instance, agent,start_locations,goal_locations) {}
 
-	// Visualization flags
+	// Visualization flags and settings
     bool use_rerun = false;
 	string log_prefix = "default_env";
+    // Visualization speed control (milliseconds)
+    int visualization_delay = 300; // Default delay between visualization steps
 #if RERUN_ENABLED
 	std::shared_ptr<rerun::RecordingStream> rec;
 #endif

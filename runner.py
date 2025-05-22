@@ -40,17 +40,6 @@ class Runner(object):
         self.all_obs[-1] = self.obs
         self.im_first_time=True
         
-        # Create a unique output directory for this runner using its ID.
-        self.save_iteration_as_image(0)
-        
-    def save_iteration_as_image(self, iteration):
-        # Create (or reuse) the output directory:
-        output_dir = os.path.join("test_images", f"env_{self.ID}")
-        os.makedirs(output_dir, exist_ok=True)
-        # Use the iteration number in the file name:
-        filename = os.path.join(output_dir, f"step_{iteration:03d}.png")
-        self.env.save_rgb_image(filename)
-        print(f"Saved image for iteration {iteration} to {filename}")
 
     def rl_run(self, weights,cl_task_num,switch_task):
         """run multiple steps and collect data for reinforcement learning"""
@@ -96,9 +85,6 @@ class Runner(object):
 
                 rewards, self.valid_actions, self.obs, self.vector, self.train_valid, self.done, \
                     num_on_goals= self.rl_one_step(actions)
-                    
-                out_file = os.path.join(self.output_dir, f"step_{step:03d}.png")
-                self.env.save_rgb_image(out_file)
 
                 mb_rewards.append(rewards)
 

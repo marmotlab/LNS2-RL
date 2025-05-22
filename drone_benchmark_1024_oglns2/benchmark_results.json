@@ -1,0 +1,70 @@
+{
+  "metadata": {
+    "manhattan_distances": [
+      1407,
+      693,
+      688,
+      653,
+      987,
+      676,
+      556,
+      737,
+      993,
+      1056,
+      572,
+      921,
+      792,
+      1038,
+      535
+    ],
+    "avg_manhattan_distance": 820.2666666666667,
+    "num_agents": 15,
+    "timestamp": "2025-05-22 11:46:28"
+  },
+  "results": [
+    {
+      "algorithm": "Original LNS2",
+      "runtime": 135.66565370559692,
+      "path_lengths": [
+        1485,
+        693,
+        0,
+        937,
+        987,
+        676,
+        556,
+        737,
+        0,
+        0,
+        0,
+        0,
+        792,
+        0,
+        535
+      ],
+      "avg_path_length": 493.2,
+      "success_rate": 1.0,
+      "iterations": 0,
+      "final_collisions": 0,
+      "algorithm_type": "grid_based_static",
+      "avg_path_length_ratio": 0.6326901915711314,
+      "path_length_ratios": [
+        1.0554371002132197,
+        1.0,
+        0.0,
+        1.4349157733537519,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        1.0
+      ]
+    }
+  ]
+}

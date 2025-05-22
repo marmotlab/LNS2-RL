@@ -14,7 +14,7 @@ Instance::Instance(const vector<vector<int>>& obs_map, const vector<pair<int,int
 }
 
 // Init map instance with dynamic map sequence
-Instance::Instance(const vector<vector<vector<int>>>& grid_sequence, const vector<pair<int,int>>& start_poss, const vector<pair<int,int>>& goal_poss, int num_of_agents, int num_of_rows):
+Instance::Instance(const vector<vector<vector<float>>>& grid_sequence, const vector<pair<int,int>>& start_poss, const vector<pair<int,int>>& goal_poss, int num_of_agents, int num_of_rows):
         num_of_agents(num_of_agents), num_of_rows(num_of_rows), num_of_cols(num_of_rows), dynamic_map_seq(grid_sequence)
 {
     std::cout << "[INSTANCE] Initializing with dynamic map sequence and " << num_of_agents << " agents\n";
@@ -22,13 +22,13 @@ Instance::Instance(const vector<vector<vector<int>>>& grid_sequence, const vecto
               << ", frame shape: (" << grid_sequence[0].size() << ", " << grid_sequence[0][0].size() << ")\n";
 
     // Extract static map from the first frame of the dynamic map sequence
-    // In our convention, static obstacles have value 1 in the dynamic map
+    // In GridMapEnv, static obstacles have values > 0.9
     vector<vector<int>> static_map(grid_sequence[0].size(), vector<int>(grid_sequence[0][0].size(), 0));
 
     for (size_t i = 0; i < grid_sequence[0].size(); i++) {
         for (size_t j = 0; j < grid_sequence[0][0].size(); j++) {
-            // Static obstacles have value 1 in our convention
-            if (grid_sequence[0][i][j] == 1) {
+            // Static obstacles have values > 0.9 in GridMapEnv
+            if (grid_sequence[0][i][j] > 0.9) {
                 static_map[i][j] = 1;
             }
         }
@@ -126,7 +126,8 @@ list<int> Instance::getNeighbors(int curr) const  // get truely moveable agent
 %   - timestep, row, col: the current time step and cell coordinates.
 %
 % Behavior:
-%   - Checks if there is a dynamic obstacle at the specified cell and time step (value == 2).
+%   - Checks if there is a dynamic obstacle at the specified cell and time step.
+%   - In GridMapEnv, dynamic obstacles have values between 0.1 and 0.9.
 %
 % Outputs:
 %   - True if the cell has a dynamic obstacle, false otherwise.
@@ -134,7 +135,8 @@ list<int> Instance::getNeighbors(int curr) const  // get truely moveable agent
 bool Instance::hasDynamicObstacle(int timestep, int row, int col) const {
     if (dynamic_map_seq.empty() || timestep >= dynamic_map_seq.size()) return false;
     if (row < 0 || row >= num_of_rows || col < 0 || col >= num_of_cols) return false;
-    return dynamic_map_seq[timestep][row][col] == 2;
+    float value = dynamic_map_seq[timestep][row][col];
+    return value > 0.1 && value <= 0.9;
     // Note: This method is kept for compatibility, but we now use getDynamicObstacleCost
     // to handle dynamic obstacles as soft constraints with increased cost
 }

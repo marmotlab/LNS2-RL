@@ -1,0 +1,15 @@
+Detailed Performance Analysis Log
+===============================
+
+Grid sequence optimization: 0.02 seconds
+LNS2 constructor: 39.37 seconds
+init_pp(): 18.50 seconds
+Total LNS2 initialization: 57.91 seconds
+
+Percentage breakdown of LNS2 initialization:
+Grid sequence optimization: 0.0%
+LNS2 constructor: 68.0%
+init_pp(): 31.9%
+
+Most expensive part: LNS2 constructor
+This is likely due to processing the dynamic map sequence.

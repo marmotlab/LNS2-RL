@@ -14,12 +14,13 @@ public:
     int num_of_agents;
 
     // Store full dynamic map sequence [t][row][col]
-    std::vector<std::vector<std::vector<int>>> dynamic_map_seq;
+    // Using float to handle GridMapEnv representation directly
+    std::vector<std::vector<std::vector<float>>> dynamic_map_seq;
 
 	Instance()=default;
 
     // Constructor with dynamic map sequence
-    Instance(const std::vector<std::vector<std::vector<int>>>& grid_sequence,
+    Instance(const std::vector<std::vector<std::vector<float>>>& grid_sequence,
         const std::vector<std::pair<int, int>>& start_poss,
         const std::vector<std::pair<int, int>>& goal_poss,
         int num_of_agents, int num_of_rows);
@@ -62,14 +63,17 @@ public:
     const vector<bool>& getMap() const { return my_map; }
 
     // Check if a cell has a dynamic obstacle at a specific time
+    // In GridMapEnv, dynamic obstacles have values between 0.1 and 0.9
     bool hasDynamicObstacle(int timestep, int row, int col) const;
 
     // Get the cost of moving through a dynamic obstacle (radar zone)
     // Returns 3 if there's a dynamic obstacle, 1 otherwise
+    // In GridMapEnv, dynamic obstacles have values between 0.1 and 0.9
     inline int getDynamicObstacleCost(int timestep, int row, int col) const {
         if (!dynamic_map_seq.empty() && timestep < dynamic_map_seq.size()) {
             if (row >= 0 && row < num_of_rows && col >= 0 && col < num_of_cols) {
-                if (dynamic_map_seq[timestep][row][col] == 2) // Dynamic obstacle (radar zone)
+                float value = dynamic_map_seq[timestep][row][col];
+                if (value > 0.1 && value <= 0.9) // Dynamic obstacle (radar zone)
                     return 3; // Higher cost for radar zones
             }
         }
@@ -83,6 +87,12 @@ public:
 
         if (my_map[next]) // Static obstacle
             return INT_MAX; // Invalid move
+
+        // Check if this is a waiting action (staying in the same location)
+        if (curr == next) {
+            // Waiting is 8x more expensive than moving
+            return 8;
+        }
 
         int row = getRowCoordinate(next);
         int col = getColCoordinate(next);
