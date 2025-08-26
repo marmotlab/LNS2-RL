@@ -51,7 +51,7 @@ Begin by cd to the directory, then run
 ```
 mkdir build
 cd build
-cmake ..
+cmake ../lns2/
 make 
 ```
 The directory name for the C++ code that needs to be compiled is 'lns2' in both the main and 'second\_stage' branches. 
